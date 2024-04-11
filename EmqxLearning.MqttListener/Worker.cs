@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using MQTTnet;
 using MQTTnet.Client;
@@ -9,7 +10,7 @@ public class Worker : BackgroundService
 {
     private readonly ILogger<Worker> _logger;
     private readonly IConfiguration _configuration;
-    private IManagedMqttClient _mqttClient;
+    private readonly ConcurrentBag<IManagedMqttClient> _mqttClients;
     private MqttClientOptions _options;
     private ManagedMqttClientOptions _managedOptions;
     private CancellationToken _stoppingToken;
@@ -19,22 +20,27 @@ public class Worker : BackgroundService
     {
         _logger = logger;
         _configuration = configuration;
+        _mqttClients = new ConcurrentBag<IManagedMqttClient>();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _stoppingToken = stoppingToken;
-        await Initialize();
+        var maxThreads = _configuration.GetValue<int>("MqttClientOptions:ProcessingThreads");
+        for (int i = 0; i < maxThreads; i++)
+            await Initialize(i);
         while (!stoppingToken.IsCancellationRequested)
             await Task.Delay(1000, stoppingToken);
     }
 
-    private async Task Initialize()
+    private async Task Initialize(int threadIdx)
     {
         var factory = new MqttFactory();
-        _mqttClient = factory.CreateManagedMqttClient();
+        var clientId = $"{_configuration["MqttClientOptions:ClientId"]}_{threadIdx}";
+        var mqttClient = factory.CreateManagedMqttClient();
+        _mqttClients.Add(mqttClient);
         _options = new MqttClientOptionsBuilder()
-            .WithClientId(_configuration["MqttClientOptions:ClientId"])
+            .WithClientId(clientId)
             .WithTcpServer(_configuration["MqttClientOptions:TcpServer"])
             .WithCleanSession(value: _configuration.GetValue<bool>("MqttClientOptions:CleanSession"))
             .Build();
@@ -43,19 +49,19 @@ public class Worker : BackgroundService
             .WithClientOptions(_options)
             .Build();
 
-        _mqttClient.ConnectedAsync += OnConnected;
-        _mqttClient.DisconnectedAsync += OnDisconnected;
-        _mqttClient.ApplicationMessageReceivedAsync += OnMessageReceived;
-        await _mqttClient.StartAsync(_managedOptions);
+        mqttClient.ConnectedAsync += (e) => OnConnected(e, mqttClient);
+        mqttClient.DisconnectedAsync += OnDisconnected;
+        mqttClient.ApplicationMessageReceivedAsync += OnMessageReceived;
+        await mqttClient.StartAsync(_managedOptions);
     }
 
-    private async Task OnConnected(MqttClientConnectedEventArgs e)
+    private async Task OnConnected(MqttClientConnectedEventArgs e, IManagedMqttClient mqttClient)
     {
-        _logger.LogInformation("### CONNECTED WITH SERVER ###");
+        _logger.LogInformation("### CONNECTED WITH SERVER - ClientId: {0} ###", mqttClient.Options.ClientOptions.ClientId);
 
         var topic = _configuration["MqttClientOptions:Topic"];
         var qos = _configuration.GetValue<MQTTnet.Protocol.MqttQualityOfServiceLevel>("MqttClientOptions:QoS");
-        await _mqttClient.SubscribeAsync(topic: topic, qualityOfServiceLevel: qos);
+        await mqttClient.SubscribeAsync(topic: topic, qualityOfServiceLevel: qos);
 
         _logger.LogInformation("### SUBSCRIBED topic {0} - qos {1} ###", topic, qos);
     }
@@ -75,7 +81,7 @@ public class Worker : BackgroundService
 
     private Task OnDisconnected(MqttClientDisconnectedEventArgs e)
     {
-        _logger.LogInformation("### DISCONNECTED FROM SERVER ### {0}", e);
+        _logger.LogInformation("### DISCONNECTED FROM SERVER ### {0}", e.Exception);
         return Task.CompletedTask;
     }
 
@@ -83,7 +89,7 @@ public class Worker : BackgroundService
     {
         base.Dispose();
 
-        if (_mqttClient != null)
-            _mqttClient.Dispose();
+        foreach (var mqttClient in _mqttClients)
+            mqttClient.Dispose();
     }
 }
