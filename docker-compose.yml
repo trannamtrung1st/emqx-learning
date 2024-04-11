@@ -16,22 +16,11 @@ services:
       - MqttClientOptions__ProcessingTime=0
     networks:
       - emqx-bridge
-      
-  # mqtt-listener-2:
-  #   image: emqx-learning/mqtt-listner:latest
-  #   build:
-  #     context: .
-  #     dockerfile: EmqxLearning.MqttListener/Dockerfile
-  #   environment:
-  #     - MqttClientOptions__ClientId=mqtt-listener-2
-  #     - MqttClientOptions__TcpServer=node1.emqx.io
-  #     - MqttClientOptions__CleanSession=true
-  #     - MqttClientOptions__ReconnectDelaySecs=5
-  #     - MqttClientOptions__Topic=projectId/+/devices/+/telemetry
-  #     - MqttClientOptions__Qos=1
-  #     - MqttClientOptions__ProcessingTime=0
-  #   networks:
-  #     - emqx-bridge
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "500M"
 
   emqtt-bench:
     image: emqx-learning/custom-emqtt-bench:latest
