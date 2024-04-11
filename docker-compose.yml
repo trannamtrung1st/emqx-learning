@@ -11,7 +11,7 @@ services:
       - MqttClientOptions__TcpServer=node1.emqx.io
       - MqttClientOptions__CleanSession=true
       - MqttClientOptions__ReconnectDelaySecs=5
-      - MqttClientOptions__Topic="$share/ahi/projectId/+/devices/+/telemetry"
+      - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
       - MqttClientOptions__Qos=1
       - MqttClientOptions__ProcessingTime=0
     networks:
@@ -32,7 +32,7 @@ services:
       - MqttClientOptions__TcpServer=node1.emqx.io
       - MqttClientOptions__CleanSession=true
       - MqttClientOptions__ReconnectDelaySecs=5
-      - MqttClientOptions__Topic="$share/ahi/projectId/+/devices/+/telemetry"
+      - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
       - MqttClientOptions__Qos=1
       - MqttClientOptions__ProcessingTime=0
     networks:
