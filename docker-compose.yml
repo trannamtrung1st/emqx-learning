@@ -13,7 +13,7 @@ services:
       - MqttClientOptions__ReconnectDelaySecs=5
       - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
       - MqttClientOptions__Qos=1
-      - MqttClientOptions__ProcessingTime=0
+      - MqttClientOptions__ProcessingTime=5
     networks:
       - emqx-bridge
     deploy:
@@ -34,7 +34,133 @@ services:
       - MqttClientOptions__ReconnectDelaySecs=5
       - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
       - MqttClientOptions__Qos=1
-      - MqttClientOptions__ProcessingTime=0
+      - MqttClientOptions__ProcessingTime=5
+    networks:
+      - emqx-bridge
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "500M"
+
+  mqtt-listener-3:
+    image: emqx-learning/mqtt-listner:latest
+    build:
+      context: .
+      dockerfile: EmqxLearning.MqttListener/Dockerfile
+    environment:
+      - MqttClientOptions__ClientId=mqtt-listener-3
+      - MqttClientOptions__TcpServer=node1.emqx.io
+      - MqttClientOptions__CleanSession=true
+      - MqttClientOptions__ReconnectDelaySecs=5
+      - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
+      - MqttClientOptions__Qos=1
+      - MqttClientOptions__ProcessingTime=5
+    networks:
+      - emqx-bridge
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "500M"
+
+  mqtt-listener-4:
+    image: emqx-learning/mqtt-listner:latest
+    build:
+      context: .
+      dockerfile: EmqxLearning.MqttListener/Dockerfile
+    environment:
+      - MqttClientOptions__ClientId=mqtt-listener-4
+      - MqttClientOptions__TcpServer=node1.emqx.io
+      - MqttClientOptions__CleanSession=true
+      - MqttClientOptions__ReconnectDelaySecs=5
+      - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
+      - MqttClientOptions__Qos=1
+      - MqttClientOptions__ProcessingTime=5
+    networks:
+      - emqx-bridge
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "500M"
+
+  mqtt-listener-5:
+    image: emqx-learning/mqtt-listner:latest
+    build:
+      context: .
+      dockerfile: EmqxLearning.MqttListener/Dockerfile
+    environment:
+      - MqttClientOptions__ClientId=mqtt-listener-5
+      - MqttClientOptions__TcpServer=node1.emqx.io
+      - MqttClientOptions__CleanSession=true
+      - MqttClientOptions__ReconnectDelaySecs=5
+      - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
+      - MqttClientOptions__Qos=1
+      - MqttClientOptions__ProcessingTime=5
+    networks:
+      - emqx-bridge
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "500M"
+
+  mqtt-listener-6:
+    image: emqx-learning/mqtt-listner:latest
+    build:
+      context: .
+      dockerfile: EmqxLearning.MqttListener/Dockerfile
+    environment:
+      - MqttClientOptions__ClientId=mqtt-listener-6
+      - MqttClientOptions__TcpServer=node1.emqx.io
+      - MqttClientOptions__CleanSession=true
+      - MqttClientOptions__ReconnectDelaySecs=5
+      - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
+      - MqttClientOptions__Qos=1
+      - MqttClientOptions__ProcessingTime=5
+    networks:
+      - emqx-bridge
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "500M"
+
+  mqtt-listener-7:
+    image: emqx-learning/mqtt-listner:latest
+    build:
+      context: .
+      dockerfile: EmqxLearning.MqttListener/Dockerfile
+    environment:
+      - MqttClientOptions__ClientId=mqtt-listener-7
+      - MqttClientOptions__TcpServer=node1.emqx.io
+      - MqttClientOptions__CleanSession=true
+      - MqttClientOptions__ReconnectDelaySecs=5
+      - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
+      - MqttClientOptions__Qos=1
+      - MqttClientOptions__ProcessingTime=5
+    networks:
+      - emqx-bridge
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "500M"
+
+  mqtt-listener-8:
+    image: emqx-learning/mqtt-listner:latest
+    build:
+      context: .
+      dockerfile: EmqxLearning.MqttListener/Dockerfile
+    environment:
+      - MqttClientOptions__ClientId=mqtt-listener-8
+      - MqttClientOptions__TcpServer=node1.emqx.io
+      - MqttClientOptions__CleanSession=true
+      - MqttClientOptions__ReconnectDelaySecs=5
+      - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
+      - MqttClientOptions__Qos=1
+      - MqttClientOptions__ProcessingTime=5
     networks:
       - emqx-bridge
     deploy:
@@ -60,6 +186,7 @@ services:
     container_name: emqx1
     environment:
       - "EMQX_NODE_NAME=emqx@node1.emqx.io"
+      - "EMQX_SESSION__MAX_MQUEUE_LEN=1000000"
       # - "EMQX_CLUSTER__DISCOVERY_STRATEGY=static"
       # - "EMQX_CLUSTER__STATIC__SEEDS=[emqx@node1.emqx.io,emqx@node2.emqx.io]"
     healthcheck:
@@ -85,6 +212,7 @@ services:
   #   container_name: emqx2
   #   environment:
   #     - "EMQX_NODE_NAME=emqx@node2.emqx.io"
+  #     - "EMQX_SESSION__MAX_MQUEUE_LEN=1000000"
   #     - "EMQX_CLUSTER__DISCOVERY_STRATEGY=static"
   #     - "EMQX_CLUSTER__STATIC__SEEDS=[emqx@node1.emqx.io,emqx@node2.emqx.io]"
   #   healthcheck:
