@@ -186,7 +186,7 @@ services:
     container_name: emqx1
     environment:
       - "EMQX_NODE_NAME=emqx@node1.emqx.io"
-      - "EMQX_SESSION__MAX_MQUEUE_LEN=1000000"
+      - "EMQX_MQTT__MAX_MQUEUE_LEN=1000000"
       # - "EMQX_CLUSTER__DISCOVERY_STRATEGY=static"
       # - "EMQX_CLUSTER__STATIC__SEEDS=[emqx@node1.emqx.io,emqx@node2.emqx.io]"
     healthcheck:
@@ -212,7 +212,7 @@ services:
   #   container_name: emqx2
   #   environment:
   #     - "EMQX_NODE_NAME=emqx@node2.emqx.io"
-  #     - "EMQX_SESSION__MAX_MQUEUE_LEN=1000000"
+  #     - "EMQX_MQTT__MAX_MQUEUE_LEN=1000000"
   #     - "EMQX_CLUSTER__DISCOVERY_STRATEGY=static"
   #     - "EMQX_CLUSTER__STATIC__SEEDS=[emqx@node1.emqx.io,emqx@node2.emqx.io]"
   #   healthcheck:
