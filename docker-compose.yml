@@ -16,9 +16,10 @@ services:
       - MqttClientOptions__ReconnectDelaySecs=5
       - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
       - MqttClientOptions__Qos=1
-      - ReceiveDelay=0
-      - ProcessingTime=100
-      - ProcessingThreads=5
+      - ReceiveDelay=3
+      - ProcessingTime=50
+      - ProcessingThreads=20
+      - BackgroundProcessing=true
     networks:
       - emqx-bridge
     deploy:
@@ -42,9 +43,37 @@ services:
       - MqttClientOptions__ReconnectDelaySecs=5
       - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
       - MqttClientOptions__Qos=1
-      - ReceiveDelay=0
-      - ProcessingTime=100
-      - ProcessingThreads=5
+      - ReceiveDelay=3
+      - ProcessingTime=50
+      - ProcessingThreads=20
+      - BackgroundProcessing=true
+    networks:
+      - emqx-bridge
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: "500M"
+
+  mqtt-listener-3:
+    image: emqx-learning/mqtt-listner:latest
+    # logging:
+    #   driver: none
+    build:
+      context: .
+      dockerfile: EmqxLearning.MqttListener/Dockerfile
+    environment:
+      - Logging__LogLevel__Default=Error
+      - MqttClientOptions__ClientId=mqtt-listener-3
+      - MqttClientOptions__TcpServer=node1.emqx.io
+      - MqttClientOptions__CleanSession=true
+      - MqttClientOptions__ReconnectDelaySecs=5
+      - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
+      - MqttClientOptions__Qos=1
+      - ReceiveDelay=3
+      - ProcessingTime=50
+      - ProcessingThreads=20
+      - BackgroundProcessing=true
     networks:
       - emqx-bridge
     deploy:

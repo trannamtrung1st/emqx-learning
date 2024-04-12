@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using MQTTnet;
 using MQTTnet.Client;
 using MQTTnet.Extensions.ManagedClient;
@@ -35,6 +36,7 @@ public class Worker : BackgroundService
 
     private async Task Initialize(int threadIdx)
     {
+        var backgroundProcessing = _configuration.GetValue<bool>("BackgroundProcessing");
         var factory = new MqttFactory();
         var clientId = $"{_configuration["MqttClientOptions:ClientId"]}_{threadIdx}";
         var mqttClient = factory.CreateManagedMqttClient();
@@ -51,7 +53,7 @@ public class Worker : BackgroundService
 
         mqttClient.ConnectedAsync += (e) => OnConnected(e, mqttClient);
         mqttClient.DisconnectedAsync += OnDisconnected;
-        mqttClient.ApplicationMessageReceivedAsync += OnMessageReceived;
+        mqttClient.ApplicationMessageReceivedAsync += backgroundProcessing ? OnMessageReceivedBackground : OnMessageReceivedNormal;
         await mqttClient.StartAsync(_managedOptions);
     }
 
@@ -66,7 +68,20 @@ public class Worker : BackgroundService
         _logger.LogInformation("### SUBSCRIBED topic {0} - qos {1} ###", topic, qos);
     }
 
-    private async Task OnMessageReceived(MqttApplicationMessageReceivedEventArgs e)
+    private async Task OnMessageReceivedNormal(MqttApplicationMessageReceivedEventArgs e)
+    {
+        // _logger.LogInformation($"### RECEIVED APPLICATION MESSAGE ###\n"
+        // + $"+ Topic = {e.ApplicationMessage.Topic}\n"
+        // + $"+ Payload = {Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment)}\n"
+        // + $"+ QoS = {e.ApplicationMessage.QualityOfServiceLevel}\n"
+        // + $"+ Retain = {e.ApplicationMessage.Retain}\n");
+        await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
+        Interlocked.Increment(ref _messageCount);
+        _logger.LogInformation("{messageCount}", _messageCount);
+        // _logger.LogInformation("Message processed done!");
+    }
+
+    private async Task OnMessageReceivedBackground(MqttApplicationMessageReceivedEventArgs e)
     {
         var _ = Task.Run(async () =>
         {
@@ -86,7 +101,8 @@ public class Worker : BackgroundService
 
     private Task OnDisconnected(MqttClientDisconnectedEventArgs e)
     {
-        _logger.LogError(e.Exception, "### DISCONNECTED FROM SERVER ###");
+        _logger.LogError(e.Exception, "### DISCONNECTED FROM SERVER ### {Event}",
+            e.Exception == null ? JsonSerializer.Serialize(e) : string.Empty);
         return Task.CompletedTask;
     }
 
