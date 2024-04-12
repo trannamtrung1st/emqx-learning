@@ -16,7 +16,6 @@ var interval = GetArgument<int>(args, "I");
 var tcpServer = GetRawEnv("MqttClientOptions__TcpServer");
 var topicFormat = GetRawEnv("MqttClientOptions__TopicFormat");
 var messagePayload = GetRawArgument(args, "m");
-messagePayload = messagePayload[1..^1];
 var qos = GetArgument<MqttQualityOfServiceLevel>(args, "q");
 var factory = new MqttFactory();
 Console.WriteLine("Setup ...");
