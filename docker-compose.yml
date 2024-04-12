@@ -3,18 +3,22 @@ version: "3.8"
 services:
   mqtt-listener-1:
     image: emqx-learning/mqtt-listner:latest
+    # logging:
+    #   driver: none
     build:
       context: .
       dockerfile: EmqxLearning.MqttListener/Dockerfile
     environment:
+      - Logging__LogLevel__Default=Error
       - MqttClientOptions__ClientId=mqtt-listener-1
       - MqttClientOptions__TcpServer=node1.emqx.io
       - MqttClientOptions__CleanSession=true
       - MqttClientOptions__ReconnectDelaySecs=5
       - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
       - MqttClientOptions__Qos=1
-      - MqttClientOptions__ProcessingTime=50
-      - MqttClientOptions__ProcessingThreads=200
+      - ReceiveDelay=0
+      - ProcessingTime=100
+      - ProcessingThreads=5
     networks:
       - emqx-bridge
     deploy:
@@ -25,18 +29,22 @@ services:
 
   mqtt-listener-2:
     image: emqx-learning/mqtt-listner:latest
+    # logging:
+    #   driver: none
     build:
       context: .
       dockerfile: EmqxLearning.MqttListener/Dockerfile
     environment:
+      - Logging__LogLevel__Default=Error
       - MqttClientOptions__ClientId=mqtt-listener-2
       - MqttClientOptions__TcpServer=node1.emqx.io
       - MqttClientOptions__CleanSession=true
       - MqttClientOptions__ReconnectDelaySecs=5
       - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
       - MqttClientOptions__Qos=1
-      - MqttClientOptions__ProcessingTime=50
-      - MqttClientOptions__ProcessingThreads=200
+      - ReceiveDelay=0
+      - ProcessingTime=100
+      - ProcessingThreads=5
     networks:
       - emqx-bridge
     deploy:
@@ -45,39 +53,84 @@ services:
           cpus: "1"
           memory: "500M"
 
-  mqtt-listener-3:
-    image: emqx-learning/mqtt-listner:latest
+  mqtt-publisher-1:
+    image: emqx-learning/mqtt-publisher:latest
     build:
       context: .
-      dockerfile: EmqxLearning.MqttListener/Dockerfile
+      dockerfile: EmqxLearning.MqttPublisher/Dockerfile
     environment:
-      - MqttClientOptions__ClientId=mqtt-listener-3
       - MqttClientOptions__TcpServer=node1.emqx.io
-      - MqttClientOptions__CleanSession=true
-      - MqttClientOptions__ReconnectDelaySecs=5
-      - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
-      - MqttClientOptions__Qos=1
-      - MqttClientOptions__ProcessingTime=50
-      - MqttClientOptions__ProcessingThreads=200
-    networks:
-      - emqx-bridge
-    deploy:
-      resources:
-        limits:
-          cpus: "1"
-          memory: "500M"
-
-  emqtt-bench:
-    image: emqx-learning/custom-emqtt-bench:latest
-    build:
-      context: .
-      dockerfile: deployment/emqtt-bench/Dockerfile
-    networks:
-      - emqx-bridge
+      - MqttClientOptions__TopicFormat=projectId/{0}/devices/{1}/telemetry
     stdin_open: true
     tty: true
+    networks:
+      - emqx-bridge
+
+  mqtt-publisher-2:
+    image: emqx-learning/mqtt-publisher:latest
+    build:
+      context: .
+      dockerfile: EmqxLearning.MqttPublisher/Dockerfile
     environment:
-      - HOST=node1.emqx.io
+      - MqttClientOptions__TcpServer=node1.emqx.io
+      - MqttClientOptions__TopicFormat=projectId/{0}/devices/{1}/telemetry
+    stdin_open: true
+    tty: true
+    networks:
+      - emqx-bridge
+
+  mqtt-publisher-3:
+    image: emqx-learning/mqtt-publisher:latest
+    build:
+      context: .
+      dockerfile: EmqxLearning.MqttPublisher/Dockerfile
+    environment:
+      - MqttClientOptions__TcpServer=node1.emqx.io
+      - MqttClientOptions__TopicFormat=projectId/{0}/devices/{1}/telemetry
+    stdin_open: true
+    tty: true
+    networks:
+      - emqx-bridge
+
+  mqtt-publisher-4:
+    image: emqx-learning/mqtt-publisher:latest
+    build:
+      context: .
+      dockerfile: EmqxLearning.MqttPublisher/Dockerfile
+    environment:
+      - MqttClientOptions__TcpServer=node1.emqx.io
+      - MqttClientOptions__TopicFormat=projectId/{0}/devices/{1}/telemetry
+    stdin_open: true
+    tty: true
+    networks:
+      - emqx-bridge
+
+  mqtt-publisher-5:
+    image: emqx-learning/mqtt-publisher:latest
+    build:
+      context: .
+      dockerfile: EmqxLearning.MqttPublisher/Dockerfile
+    environment:
+      - MqttClientOptions__TcpServer=node1.emqx.io
+      - MqttClientOptions__TopicFormat=projectId/{0}/devices/{1}/telemetry
+    stdin_open: true
+    tty: true
+    networks:
+      - emqx-bridge
+
+  # emqtt-bench:
+  #   image: emqx-learning/custom-emqtt-bench:latest
+  #   logging:
+  #     driver: none
+  #   build:
+  #     context: .
+  #     dockerfile: deployment/emqtt-bench/Dockerfile
+  #   networks:
+  #     - emqx-bridge
+  #   stdin_open: true
+  #   tty: true
+  #   environment:
+  #     - HOST=node1.emqx.io
 
   emqx1:
     image: emqx/emqx:5.6.0
@@ -85,6 +138,7 @@ services:
     environment:
       - "EMQX_NODE_NAME=emqx@node1.emqx.io"
       - "EMQX_MQTT__MAX_MQUEUE_LEN=1000000"
+      - "EMQX_MQTT__MAX_INFLIGHT=128"
       # - "EMQX_CLUSTER__DISCOVERY_STRATEGY=static"
       # - "EMQX_CLUSTER__STATIC__SEEDS=[emqx@node1.emqx.io,emqx@node2.emqx.io]"
     healthcheck:
@@ -111,6 +165,7 @@ services:
   #   environment:
   #     - "EMQX_NODE_NAME=emqx@node2.emqx.io"
   #     - "EMQX_MQTT__MAX_MQUEUE_LEN=1000000"
+  #     - "EMQX_MQTT__MAX_INFLIGHT=128"
   #     - "EMQX_CLUSTER__DISCOVERY_STRATEGY=static"
   #     - "EMQX_CLUSTER__STATIC__SEEDS=[emqx@node1.emqx.io,emqx@node2.emqx.io]"
   #   healthcheck:

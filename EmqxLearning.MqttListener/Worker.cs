@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text;
 using MQTTnet;
 using MQTTnet.Client;
 using MQTTnet.Extensions.ManagedClient;
@@ -14,6 +13,7 @@ public class Worker : BackgroundService
     private MqttClientOptions _options;
     private ManagedMqttClientOptions _managedOptions;
     private CancellationToken _stoppingToken;
+    private static long _messageCount = 0;
 
     public Worker(ILogger<Worker> logger,
         IConfiguration configuration)
@@ -26,7 +26,7 @@ public class Worker : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _stoppingToken = stoppingToken;
-        var maxThreads = _configuration.GetValue<int>("MqttClientOptions:ProcessingThreads");
+        var maxThreads = _configuration.GetValue<int>("ProcessingThreads");
         for (int i = 0; i < maxThreads; i++)
             await Initialize(i);
         while (!stoppingToken.IsCancellationRequested)
@@ -68,20 +68,25 @@ public class Worker : BackgroundService
 
     private async Task OnMessageReceived(MqttApplicationMessageReceivedEventArgs e)
     {
-        _logger.LogInformation($"### RECEIVED APPLICATION MESSAGE ###\n"
-        + $"+ Topic = {e.ApplicationMessage.Topic}\n"
-        + $"+ Payload = {Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment)}\n"
-        + $"+ QoS = {e.ApplicationMessage.QualityOfServiceLevel}\n"
-        + $"+ Retain = {e.ApplicationMessage.Retain}\n");
+        var _ = Task.Run(async () =>
+        {
+            // _logger.LogInformation($"### RECEIVED APPLICATION MESSAGE ###\n"
+            // + $"+ Topic = {e.ApplicationMessage.Topic}\n"
+            // + $"+ Payload = {Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment)}\n"
+            // + $"+ QoS = {e.ApplicationMessage.QualityOfServiceLevel}\n"
+            // + $"+ Retain = {e.ApplicationMessage.Retain}\n");
+            await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
+            Interlocked.Increment(ref _messageCount);
+            _logger.LogInformation("{messageCount}", _messageCount);
+            // _logger.LogInformation("Message processed done!");
+        });
 
-        await Task.Delay(_configuration.GetValue<int>("MqttClientOptions:ProcessingTime"));
-
-        _logger.LogInformation("Message processed done!");
+        await Task.Delay(_configuration.GetValue<int>("ReceiveDelay"));
     }
 
     private Task OnDisconnected(MqttClientDisconnectedEventArgs e)
     {
-        _logger.LogInformation("### DISCONNECTED FROM SERVER ### {0}", e.Exception);
+        _logger.LogError(e.Exception, "### DISCONNECTED FROM SERVER ###");
         return Task.CompletedTask;
     }
 

@@ -1,7 +1,11 @@
 # EMQX Learning
 
 ## Performance test
-+ To start benchmark test, access the interactive shell of `emqtt-bench` container, then execute below command:
++ To start benchmark test using `mqtt-publisher`, access the interactive shell of `mqtt-publisher` container, then execute below command:
+```sh
+./EmqxLearning.MqttPublisher -n=10000 -I=980 -q=1 -m='{"messageId":1,"temperature":32.81665161616013,"humidity":71.98951628617453,"deviceId":"DB","timestamp":1679898067325,"ack":true,"snr":9,"txt":"text"}'
+```
++ To start benchmark test using `emqtt-bench`, access the interactive shell of `emqtt-bench` container, then execute below command:
 ```sh
 ./custom_eqmtt_bench.sh 10 -c 100 -I 100 -q 1 -m '{"messageId":1,"temperature":32.81665161616013,"humidity":71.98951628617453,"deviceId":"DB","timestamp":1679898067325,"ack":true,"snr":9,"txt":"text"}'
 ```
