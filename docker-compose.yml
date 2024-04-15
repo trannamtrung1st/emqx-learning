@@ -1,6 +1,7 @@
 version: "3.8"
 # References: https://www.emqx.io/docs/en/latest/deploy/install-docker.html
 services:
+  # MQTT listeners
   mqtt-listener-1:
     image: emqx-learning/mqtt-listner:latest
     # logging:
@@ -27,7 +28,7 @@ services:
       resources:
         limits:
           cpus: "1"
-          memory: "500M"
+          memory: "250M"
     depends_on:
       emqx1:
         condition: service_healthy
@@ -60,7 +61,7 @@ services:
       resources:
         limits:
           cpus: "1"
-          memory: "500M"
+          memory: "250M"
     depends_on:
       emqx1:
         condition: service_healthy
@@ -93,13 +94,14 @@ services:
       resources:
         limits:
           cpus: "1"
-          memory: "500M"
+          memory: "250M"
     depends_on:
       emqx1:
         condition: service_healthy
       rabbitmq1:
         condition: service_healthy
 
+  # MQTT publishers
   mqtt-publisher-1:
     image: emqx-learning/mqtt-publisher:latest
     build:
@@ -190,6 +192,30 @@ services:
       rabbitmq1:
         condition: service_healthy
 
+  # RabbitMQ consumers
+  rabbitmq-consumer-1:
+    image: emqx-learning/rabbitmq-consumer:latest
+    # logging:
+    #   driver: none
+    build:
+      context: .
+      dockerfile: EmqxLearning.RabbitMqConsumer/Dockerfile
+    environment:
+      - Logging__LogLevel__Default=Error
+      - ProcessingTime=0
+      - RabbitMqClient__HostName=rabbitmq1
+    networks:
+      - emqx-bridge
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: "250M"
+    depends_on:
+      rabbitmq1:
+        condition: service_healthy
+
+  # EMQTT bench mark
   # emqtt-bench:
   #   image: emqx-learning/custom-emqtt-bench:latest
   #   logging:
@@ -204,6 +230,7 @@ services:
   #   environment:
   #     - HOST=node1.emqx.io
 
+  # EMQX nodes
   emqx1:
     image: emqx/emqx:5.6.0
     container_name: emqx1
@@ -252,6 +279,7 @@ services:
   #   # volumes:
   #   #   - $PWD/emqx2_data:/opt/emqx/data
 
+  # RabbitMQ nodes
   rabbitmq1:
     image: rabbitmq:3.13.1-management-alpine
     ports:

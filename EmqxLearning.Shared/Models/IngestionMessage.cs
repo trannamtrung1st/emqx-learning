@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace EmqxLearning.MqttListener.Models;
+namespace EmqxLearning.Shared.Models;
 
 public class IngestionMessage
 {
