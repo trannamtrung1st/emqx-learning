@@ -20,6 +20,7 @@ services:
       - ProcessingTime=50
       - ProcessingThreads=20
       - BackgroundProcessing=true
+      - RabbitMqClient__HostName=rabbitmq1
     networks:
       - emqx-bridge
     deploy:
@@ -27,6 +28,11 @@ services:
         limits:
           cpus: "1"
           memory: "500M"
+    depends_on:
+      emqx1:
+        condition: service_healthy
+      rabbitmq1:
+        condition: service_healthy
 
   mqtt-listener-2:
     image: emqx-learning/mqtt-listner:latest
@@ -47,6 +53,7 @@ services:
       - ProcessingTime=50
       - ProcessingThreads=20
       - BackgroundProcessing=true
+      - RabbitMqClient__HostName=rabbitmq1
     networks:
       - emqx-bridge
     deploy:
@@ -54,6 +61,11 @@ services:
         limits:
           cpus: "1"
           memory: "500M"
+    depends_on:
+      emqx1:
+        condition: service_healthy
+      rabbitmq1:
+        condition: service_healthy
 
   mqtt-listener-3:
     image: emqx-learning/mqtt-listner:latest
@@ -74,6 +86,7 @@ services:
       - ProcessingTime=50
       - ProcessingThreads=20
       - BackgroundProcessing=true
+      - RabbitMqClient__HostName=rabbitmq1
     networks:
       - emqx-bridge
     deploy:
@@ -81,6 +94,11 @@ services:
         limits:
           cpus: "1"
           memory: "500M"
+    depends_on:
+      emqx1:
+        condition: service_healthy
+      rabbitmq1:
+        condition: service_healthy
 
   mqtt-publisher-1:
     image: emqx-learning/mqtt-publisher:latest
@@ -94,6 +112,11 @@ services:
     tty: true
     networks:
       - emqx-bridge
+    depends_on:
+      emqx1:
+        condition: service_healthy
+      rabbitmq1:
+        condition: service_healthy
 
   mqtt-publisher-2:
     image: emqx-learning/mqtt-publisher:latest
@@ -107,6 +130,11 @@ services:
     tty: true
     networks:
       - emqx-bridge
+    depends_on:
+      emqx1:
+        condition: service_healthy
+      rabbitmq1:
+        condition: service_healthy
 
   mqtt-publisher-3:
     image: emqx-learning/mqtt-publisher:latest
@@ -120,6 +148,11 @@ services:
     tty: true
     networks:
       - emqx-bridge
+    depends_on:
+      emqx1:
+        condition: service_healthy
+      rabbitmq1:
+        condition: service_healthy
 
   mqtt-publisher-4:
     image: emqx-learning/mqtt-publisher:latest
@@ -133,6 +166,11 @@ services:
     tty: true
     networks:
       - emqx-bridge
+    depends_on:
+      emqx1:
+        condition: service_healthy
+      rabbitmq1:
+        condition: service_healthy
 
   mqtt-publisher-5:
     image: emqx-learning/mqtt-publisher:latest
@@ -146,6 +184,11 @@ services:
     tty: true
     networks:
       - emqx-bridge
+    depends_on:
+      emqx1:
+        condition: service_healthy
+      rabbitmq1:
+        condition: service_healthy
 
   # emqtt-bench:
   #   image: emqx-learning/custom-emqtt-bench:latest
@@ -208,6 +251,22 @@ services:
   #         - node2.emqx.io
   #   # volumes:
   #   #   - $PWD/emqx2_data:/opt/emqx/data
+
+  rabbitmq1:
+    image: rabbitmq:3.13.1-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - ./deployment/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
+      - ./deployment/rabbitmq/rabbitmq-definitions.json:/etc/rabbitmq/definitions.json
+    networks:
+      - emqx-bridge
+    healthcheck:
+      test: rabbitmq-diagnostics check_port_connectivity
+      interval: 30s
+      timeout: 30s
+      retries: 10
 
 networks:
   emqx-bridge:

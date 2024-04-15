@@ -1,8 +1,11 @@
 using System.Collections.Concurrent;
+using System.Text;
 using System.Text.Json;
+using EmqxLearning.MqttListener.Models;
 using MQTTnet;
 using MQTTnet.Client;
 using MQTTnet.Extensions.ManagedClient;
+using RabbitMQ.Client;
 
 namespace EmqxLearning.MqttListener;
 
@@ -10,6 +13,8 @@ public class Worker : BackgroundService
 {
     private readonly ILogger<Worker> _logger;
     private readonly IConfiguration _configuration;
+    private readonly IConnection _rabbitMqConnection;
+    private readonly IModel _rabbitMqChannel;
     private readonly ConcurrentBag<IManagedMqttClient> _mqttClients;
     private MqttClientOptions _options;
     private ManagedMqttClientOptions _managedOptions;
@@ -22,6 +27,11 @@ public class Worker : BackgroundService
         _logger = logger;
         _configuration = configuration;
         _mqttClients = new ConcurrentBag<IManagedMqttClient>();
+
+        var rabbitMqClientOptions = configuration.GetSection("RabbitMqClient");
+        var factory = rabbitMqClientOptions.Get<ConnectionFactory>();
+        _rabbitMqConnection = factory.CreateConnection();
+        _rabbitMqChannel = _rabbitMqConnection.CreateModel();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -83,17 +93,22 @@ public class Worker : BackgroundService
 
     private async Task OnMessageReceivedBackground(MqttApplicationMessageReceivedEventArgs e)
     {
-        var _ = Task.Run(async () =>
+        var _ = Task.Run(() =>
         {
             // _logger.LogInformation($"### RECEIVED APPLICATION MESSAGE ###\n"
             // + $"+ Topic = {e.ApplicationMessage.Topic}\n"
             // + $"+ Payload = {Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment)}\n"
             // + $"+ QoS = {e.ApplicationMessage.QualityOfServiceLevel}\n"
             // + $"+ Retain = {e.ApplicationMessage.Retain}\n");
-            await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
+            // await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
+            var payloadStr = Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment);
+            var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(payloadStr);
+            var ingestionMessage = new IngestionMessage(payload);
+            SendIngestionMessage(ingestionMessage);
             Interlocked.Increment(ref _messageCount);
             _logger.LogInformation("{messageCount}", _messageCount);
             // _logger.LogInformation("Message processed done!");
+            return Task.CompletedTask;
         });
 
         await Task.Delay(_configuration.GetValue<int>("ReceiveDelay"));
@@ -106,11 +121,26 @@ public class Worker : BackgroundService
         return Task.CompletedTask;
     }
 
+    private void SendIngestionMessage(IngestionMessage ingestionMessage)
+    {
+        var properties = _rabbitMqChannel.CreateBasicProperties();
+        properties.Persistent = true;
+        properties.ContentType = "application/json";
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(ingestionMessage);
+        _rabbitMqChannel.BasicPublish(exchange: ingestionMessage.TopicName,
+            routingKey: "all",
+            basicProperties: properties,
+            body: bytes);
+    }
+
     public override void Dispose()
     {
         base.Dispose();
 
         foreach (var mqttClient in _mqttClients)
             mqttClient.Dispose();
+
+        _rabbitMqChannel?.Dispose();
+        _rabbitMqConnection?.Dispose();
     }
 }
