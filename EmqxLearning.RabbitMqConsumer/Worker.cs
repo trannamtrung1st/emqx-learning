@@ -32,7 +32,7 @@ public class Worker : BackgroundService
         _rabbitMqChannel.BasicConsume(queue: "ingestion", autoAck: true, consumer: consumer);
 
         while (!stoppingToken.IsCancellationRequested)
-            await Task.Delay(1000, stoppingToken);
+            await Task.Delay(1000, _stoppingToken);
     }
 
     private void OnMessageReceived(object sender, BasicDeliverEventArgs e)
