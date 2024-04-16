@@ -229,7 +229,7 @@ services:
       RabbitMQ: "amqp://admin:zaQ%40123456!@rabbitmq1:5672"
       DataFolder: "/var/device/data"
       AzureFunctionsJobHost__logging__LogLevel__Default: "Error"
-      ProcessingTime: 0
+      ProcessingTime: 50
     networks:
       - emqx-bridge
     deploy:
