@@ -1,67 +1,114 @@
 {
-    "rabbit_version": "3.13.1",
-    "rabbitmq_version": "3.13.1",
-    "product_name": "RabbitMQ",
-    "product_version": "3.13.1",
-    "users": [
-        {
-            "name": "admin",
-            "password_hash": "ZA1IzXGPlZ8SaojnpYL4/scFj+7Ns3CvlVnBrNfHaGNRy+o9",
-            "hashing_algorithm": "rabbit_password_hashing_sha256",
-            "tags": [
-                "administrator"
-            ],
-            "limits": {}
-        }
-    ],
-    "vhosts": [
-        {
-            "name": "/"
-        }
-    ],
-    "permissions": [
-        {
-            "user": "admin",
-            "vhost": "/",
-            "configure": ".*",
-            "write": ".*",
-            "read": ".*"
-        }
-    ],
-    "topic_permissions": [],
-    "parameters": [],
-    "global_parameters": [],
-    "policies": [],
-    "queues": [
-        {
-            "name": "ingestion",
-            "vhost": "/",
-            "durable": true,
-            "auto_delete": false,
-            "arguments": {
-                "x-queue-type": "classic"
-            }
-        }
-    ],
-    "exchanges": [
-        {
-            "name": "ingestion-exchange",
-            "vhost": "/",
-            "type": "topic",
-            "durable": true,
-            "auto_delete": false,
-            "internal": false,
-            "arguments": {}
-        }
-    ],
-    "bindings": [
-        {
-            "source": "ingestion-exchange",
-            "vhost": "/",
-            "destination": "ingestion",
-            "destination_type": "queue",
-            "routing_key": "all",
-            "arguments": {}
-        }
-    ]
+  "rabbit_version": "3.13.1",
+  "rabbitmq_version": "3.13.1",
+  "product_name": "RabbitMQ",
+  "product_version": "3.13.1",
+  "users": [
+    {
+      "name": "admin",
+      "password_hash": "ZA1IzXGPlZ8SaojnpYL4/scFj+7Ns3CvlVnBrNfHaGNRy+o9",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": [
+        "administrator"
+      ],
+      "limits": {}
+    }
+  ],
+  "vhosts": [
+    {
+      "name": "/"
+    }
+  ],
+  "permissions": [
+    {
+      "user": "admin",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
+  "parameters": [
+    {
+      "value": {
+        "apply-to": "queues",
+        "definition": {
+          "ha-mode": "exactly",
+          "ha-params": 4,
+          "ha-sync-mode": "manual"
+        },
+        "pattern": "^q.*-ha$",
+        "priority": 0
+      },
+      "vhost": "/",
+      "component": "operator_policy",
+      "name": "policy-ha"
+    }
+  ],
+  "global_parameters": [
+    {
+      "name": "cluster_name",
+      "value": "rabbitmq-headless"
+    },
+    {
+      "name": "internal_cluster_id",
+      "value": "rabbitmq-cluster-id-kr9vexl_H2Y2xzsPut4cEw"
+    }
+  ],
+  "policies": [
+    {
+      "vhost": "/",
+      "name": "Lazy",
+      "pattern": "^lazy-queue$",
+      "apply-to": "queues",
+      "definition": {
+        "queue-mode": "default"
+      },
+      "priority": 0
+    },
+    {
+      "vhost": "/",
+      "name": "policy-ha",
+      "pattern": "^q.*-ha$",
+      "apply-to": "queues",
+      "definition": {
+        "ha-mode": "exactly",
+        "ha-params": 4,
+        "ha-sync-mode": "manual"
+      },
+      "priority": 0
+    }
+  ],
+  "queues": [
+    {
+      "name": "ingestion",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "ingestion-exchange",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "ingestion-exchange",
+      "vhost": "/",
+      "destination": "ingestion",
+      "destination_type": "queue",
+      "routing_key": "all",
+      "arguments": {}
+    }
+  ]
 }
