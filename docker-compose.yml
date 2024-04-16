@@ -190,7 +190,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: "516M"
+          memory: "1024M"
 
   # Azure services
   azurite:
