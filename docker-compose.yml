@@ -11,7 +11,6 @@ services:
       dockerfile: EmqxLearning.MqttListener/Dockerfile
     environment:
       - Logging__LogLevel__Default=Error
-      - MqttClientOptions__ClientId=mqtt-listener-1
       - MqttClientOptions__TcpServer=node1.emqx.io
       - MqttClientOptions__CleanSession=true
       - MqttClientOptions__ReconnectDelaySecs=5
@@ -25,72 +24,7 @@ services:
     networks:
       - emqx-bridge
     deploy:
-      resources:
-        limits:
-          cpus: "1"
-          memory: "250M"
-    depends_on:
-      emqx1:
-        condition: service_healthy
-      rabbitmq1:
-        condition: service_healthy
-
-  mqtt-listener-2:
-    image: emqx-learning/mqtt-listner:latest
-    # logging:
-    #   driver: none
-    build:
-      context: .
-      dockerfile: EmqxLearning.MqttListener/Dockerfile
-    environment:
-      - Logging__LogLevel__Default=Error
-      - MqttClientOptions__ClientId=mqtt-listener-2
-      - MqttClientOptions__TcpServer=node1.emqx.io
-      - MqttClientOptions__CleanSession=true
-      - MqttClientOptions__ReconnectDelaySecs=5
-      - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
-      - MqttClientOptions__Qos=1
-      - ReceiveDelay=3
-      - ProcessingTime=50
-      - ProcessingThreads=20
-      - BackgroundProcessing=true
-      - RabbitMqClient__HostName=rabbitmq1
-    networks:
-      - emqx-bridge
-    deploy:
-      resources:
-        limits:
-          cpus: "1"
-          memory: "250M"
-    depends_on:
-      emqx1:
-        condition: service_healthy
-      rabbitmq1:
-        condition: service_healthy
-
-  mqtt-listener-3:
-    image: emqx-learning/mqtt-listner:latest
-    # logging:
-    #   driver: none
-    build:
-      context: .
-      dockerfile: EmqxLearning.MqttListener/Dockerfile
-    environment:
-      - Logging__LogLevel__Default=Error
-      - MqttClientOptions__ClientId=mqtt-listener-3
-      - MqttClientOptions__TcpServer=node1.emqx.io
-      - MqttClientOptions__CleanSession=true
-      - MqttClientOptions__ReconnectDelaySecs=5
-      - MqttClientOptions__Topic=$$share/ahi/projectId/+/devices/+/telemetry
-      - MqttClientOptions__Qos=1
-      - ReceiveDelay=3
-      - ProcessingTime=50
-      - ProcessingThreads=20
-      - BackgroundProcessing=true
-      - RabbitMqClient__HostName=rabbitmq1
-    networks:
-      - emqx-bridge
-    deploy:
+      replicas: 3
       resources:
         limits:
           cpus: "1"
@@ -114,78 +48,8 @@ services:
     tty: true
     networks:
       - emqx-bridge
-    depends_on:
-      emqx1:
-        condition: service_healthy
-      rabbitmq1:
-        condition: service_healthy
-
-  mqtt-publisher-2:
-    image: emqx-learning/mqtt-publisher:latest
-    build:
-      context: .
-      dockerfile: EmqxLearning.MqttPublisher/Dockerfile
-    environment:
-      - MqttClientOptions__TcpServer=node1.emqx.io
-      - MqttClientOptions__TopicFormat=projectId/{0}/devices/{1}/telemetry
-    stdin_open: true
-    tty: true
-    networks:
-      - emqx-bridge
-    depends_on:
-      emqx1:
-        condition: service_healthy
-      rabbitmq1:
-        condition: service_healthy
-
-  mqtt-publisher-3:
-    image: emqx-learning/mqtt-publisher:latest
-    build:
-      context: .
-      dockerfile: EmqxLearning.MqttPublisher/Dockerfile
-    environment:
-      - MqttClientOptions__TcpServer=node1.emqx.io
-      - MqttClientOptions__TopicFormat=projectId/{0}/devices/{1}/telemetry
-    stdin_open: true
-    tty: true
-    networks:
-      - emqx-bridge
-    depends_on:
-      emqx1:
-        condition: service_healthy
-      rabbitmq1:
-        condition: service_healthy
-
-  mqtt-publisher-4:
-    image: emqx-learning/mqtt-publisher:latest
-    build:
-      context: .
-      dockerfile: EmqxLearning.MqttPublisher/Dockerfile
-    environment:
-      - MqttClientOptions__TcpServer=node1.emqx.io
-      - MqttClientOptions__TopicFormat=projectId/{0}/devices/{1}/telemetry
-    stdin_open: true
-    tty: true
-    networks:
-      - emqx-bridge
-    depends_on:
-      emqx1:
-        condition: service_healthy
-      rabbitmq1:
-        condition: service_healthy
-
-  mqtt-publisher-5:
-    image: emqx-learning/mqtt-publisher:latest
-    build:
-      context: .
-      dockerfile: EmqxLearning.MqttPublisher/Dockerfile
-    environment:
-      - MqttClientOptions__TcpServer=node1.emqx.io
-      - MqttClientOptions__TopicFormat=projectId/{0}/devices/{1}/telemetry
-    stdin_open: true
-    tty: true
-    networks:
-      - emqx-bridge
+    deploy:
+      replicas: 3
     depends_on:
       emqx1:
         condition: service_healthy
@@ -207,6 +71,7 @@ services:
   #   networks:
   #     - emqx-bridge
   #   deploy:
+  #     replicas: 1
   #     resources:
   #       limits:
   #         cpus: "1"
@@ -233,6 +98,7 @@ services:
     networks:
       - emqx-bridge
     deploy:
+      replicas: 1
       resources:
         limits:
           cpus: "1"
