@@ -48,14 +48,19 @@ public class Worker : BackgroundService
     {
         var backgroundProcessing = _configuration.GetValue<bool>("BackgroundProcessing");
         var factory = new MqttFactory();
-        var clientId = $"{_configuration["MqttClientOptions:ClientId"]}_{threadIdx}";
         var mqttClient = factory.CreateManagedMqttClient();
         _mqttClients.Add(mqttClient);
-        _options = new MqttClientOptionsBuilder()
-            .WithClientId(clientId)
+        var optionsBuilder = new MqttClientOptionsBuilder()
             .WithTcpServer(_configuration["MqttClientOptions:TcpServer"])
-            .WithCleanSession(value: _configuration.GetValue<bool>("MqttClientOptions:CleanSession"))
-            .Build();
+            .WithCleanSession(value: _configuration.GetValue<bool>("MqttClientOptions:CleanSession"));
+
+        if (_configuration["MqttClientOptions:ClientId"] != null)
+        {
+            var clientId = $"{_configuration["MqttClientOptions:ClientId"]}_{threadIdx}";
+            optionsBuilder = optionsBuilder.WithClientId(clientId);
+        }
+
+        _options = optionsBuilder.Build();
         _managedOptions = new ManagedMqttClientOptionsBuilder()
             .WithAutoReconnectDelay(TimeSpan.FromSeconds(_configuration.GetValue<int>("MqttClientOptions:ReconnectDelaySecs")))
             .WithClientOptions(_options)
