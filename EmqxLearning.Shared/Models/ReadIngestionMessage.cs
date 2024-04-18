@@ -1,5 +1,3 @@
-using System.Collections.Immutable;
-
 namespace EmqxLearning.Shared.Models;
 
 public class ReadIngestionMessage
