@@ -10,7 +10,7 @@ services:
       context: .
       dockerfile: EmqxLearning.MqttListener/Dockerfile
     environment:
-      Logging__LogLevel__Default: Error
+      Logging__LogLevel__Default: Warning
       MqttClientOptions__TcpServer: node1.emqx.io
       MqttClientOptions__CleanSession: true
       MqttClientOptions__ReconnectDelaySecs: 5
@@ -65,10 +65,15 @@ services:
       context: .
       dockerfile: EmqxLearning.RabbitMqConsumer/Dockerfile
     environment:
-      Logging__LogLevel__Default: Error
-      ProcessingTime: 0
+      Logging__LogLevel__Default: Warning
+      ProcessingTime: 100
+      ConsumerCount: 5
+      InsertDb: true
+      ConnectionStrings__DeviceDb: User ID=postgres;Password=zaQ@123456!;Host=timescaledb1;Port=5432;Database=device;Pooling=true;Maximum Pool Size=10;
       RabbitMqClient__HostName: rabbitmq1
-      ConnectionStrings__DeviceDb: "User ID=postgres;Password=zaQ@123456!;Host=timescaledb1;Port=5432;Database=device;Pooling=true"
+      RabbitMqClient__DispatchConsumersAsync: true
+      RabbitMqClient__ConsumerDispatchConcurrency: 200
+      RabbitMqChannel__PrefetchCount: 256
     networks:
       - emqx-bridge
     deploy:
@@ -94,7 +99,7 @@ services:
   #     AzureServiceBus__SharedAccessKey: "zaQ@123456!"
   #     RabbitMQ: "amqp://admin:zaQ%40123456!@rabbitmq1:5672"
   #     DataFolder: "/var/device/data"
-  #     AzureFunctionsJobHost__logging__LogLevel__Default: "Error"
+  #     AzureFunctionsJobHost__logging__LogLevel__Default: "Warning"
   #     ProcessingTime: 50
   #   networks:
   #     - emqx-bridge
@@ -233,7 +238,7 @@ services:
       replicas: 1
       resources:
         limits:
-          cpus: 1
+          cpus: 4
           memory: "5G"
 
   # Azure services

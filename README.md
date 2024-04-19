@@ -9,3 +9,12 @@
 ```sh
 ./custom_eqmtt_bench.sh 10 -c 100 -I 100 -q 1 -m '{"messageId":1,"temperature":32.81665161616013,"humidity":71.98951628617453,"deviceId":"DB","timestamp":1679898067325,"ack":true,"snr":9,"txt":"text"}'
 ```
+
+## Utilities
++ To check number of connections
+```sql
+select count(*)
+from pg_stat_activity
+where datname = 'device'
+and query like '%INSERT INTO device_metric_series%';
+```

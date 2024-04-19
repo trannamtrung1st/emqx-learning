@@ -13,6 +13,7 @@ public class Worker : BackgroundService
     private readonly IConfiguration _configuration;
     private readonly IConnection _rabbitMqConnection;
     private readonly IModel _rabbitMqChannel;
+    private readonly NpgsqlDataSource _dataSource;
     private CancellationToken _stoppingToken;
 
     public Worker(ILogger<Worker> logger,
@@ -21,36 +22,55 @@ public class Worker : BackgroundService
         _logger = logger;
         _configuration = configuration;
 
+        _dataSource = NpgsqlDataSource.Create(_configuration.GetConnectionString("DeviceDb"));
+
         var rabbitMqClientOptions = configuration.GetSection("RabbitMqClient");
         var factory = rabbitMqClientOptions.Get<ConnectionFactory>();
         _rabbitMqConnection = factory.CreateConnection();
         _rabbitMqChannel = _rabbitMqConnection.CreateModel();
+        var rabbitMqChannelOptions = _configuration.GetSection("RabbitMqChannel");
+        _rabbitMqChannel.BasicQos(
+            prefetchSize: 0, // RabbitMQ not implemented
+            prefetchCount: rabbitMqChannelOptions.GetValue<ushort>("PrefetchCount"),
+            global: false);
+        // _rabbitMqChannel.BasicQos(
+        //     prefetchSize: 0, // RabbitMQ not implemented
+        //     prefetchCount: rabbitMqChannelOptions.GetValue<ushort>("GlobalPrefetchCount"),
+        //     global: true); // does not support in 'quorum' queue [TBD]
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var consumer = new EventingBasicConsumer(_rabbitMqChannel);
-        consumer.Received += OnMessageReceived;
-        _rabbitMqChannel.BasicConsume(queue: "ingestion", autoAck: true, consumer: consumer);
+        _stoppingToken = stoppingToken;
+
+        var consumerCount = _configuration.GetValue<int>("ConsumerCount");
+        for (int i = 0; i < consumerCount; i++)
+        {
+            var consumer = new AsyncEventingBasicConsumer(_rabbitMqChannel);
+            consumer.Received += OnMessageReceived;
+            _rabbitMqChannel.BasicConsume(queue: "ingestion", autoAck: false, consumer: consumer);
+        }
 
         while (!stoppingToken.IsCancellationRequested)
             await Task.Delay(1000, _stoppingToken);
     }
 
-    private void OnMessageReceived(object sender, BasicDeliverEventArgs e)
+    private async Task OnMessageReceived(object sender, BasicDeliverEventArgs e)
     {
         var ingestionMessage = JsonSerializer.Deserialize<ReadIngestionMessage>(e.Body.ToArray());
         _logger.LogInformation("Metrics count {Count}", ingestionMessage.RawData.Count);
         var values = ConvertToSeriesRecords(ingestionMessage);
-        InsertToDb(values).Wait();
-        Thread.Sleep(_configuration.GetValue<int>("ProcessingTime"));
+        if (_configuration.GetValue<bool>("InsertDb"))
+            await InsertToDb(values);
+        await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
+        _rabbitMqChannel.BasicAck(e.DeliveryTag, false);
     }
 
     private static IEnumerable<object> ConvertToSeriesRecords(ReadIngestionMessage message)
     {
         var data = message.RawData;
         var timestamp = DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(data["timestamp"].ToString()));
-        var deviceId = (string)data["deviceId"];
+        var deviceId = data["deviceId"].ToString();
         data.Remove("timestamp");
         data.Remove("deviceId");
         var values = new List<object>();
@@ -73,8 +93,7 @@ public class Worker : BackgroundService
 
     private async Task InsertToDb(IEnumerable<object> values)
     {
-        await using NpgsqlDataSource dataSource = NpgsqlDataSource.Create(_configuration.GetConnectionString("DeviceDb"));
-        await using NpgsqlConnection connection = await dataSource.OpenConnectionAsync();
+        await using NpgsqlConnection connection = await _dataSource.OpenConnectionAsync();
         var inserted = await connection.ExecuteAsync(@"INSERT INTO device_metric_series(_ts, device_id, metric_key, value, retention_days)
                                                        VALUES (@Timestamp, @DeviceId, @MetricKey, @Value, @RetentionDays);", values);
         _logger.LogInformation("Records count: {Count}", inserted);
@@ -83,6 +102,7 @@ public class Worker : BackgroundService
     public override void Dispose()
     {
         base.Dispose();
+        _dataSource?.Dispose();
         _rabbitMqChannel?.Dispose();
         _rabbitMqConnection?.Dispose();
     }
