@@ -85,6 +85,8 @@ services:
     depends_on:
       rabbitmq1:
         condition: service_healthy
+      timescaledb1:
+        condition: service_started
 
   # rabbitmq-function-1:
   #   image: emqx-learning/rabbitmq-function:latest
