@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Dapper;
 using EmqxLearning.Shared.Models;
@@ -57,13 +58,21 @@ public class Worker : BackgroundService
 
     private async Task OnMessageReceived(object sender, BasicDeliverEventArgs e)
     {
+        var sw = Stopwatch.StartNew();
         var ingestionMessage = JsonSerializer.Deserialize<ReadIngestionMessage>(e.Body.ToArray());
         _logger.LogInformation("Metrics count {Count}", ingestionMessage.RawData.Count);
         var values = ConvertToSeriesRecords(ingestionMessage);
         if (_configuration.GetValue<bool>("InsertDb"))
+        {
+            var startInsert = sw.ElapsedMilliseconds;
             await InsertToDb(values);
+            var insertTime = sw.ElapsedMilliseconds - startInsert;
+            // Console.WriteLine($"Insert to DB: {insertTime}");
+        }
         await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
         _rabbitMqChannel.BasicAck(e.DeliveryTag, false);
+        sw.Stop();
+        // Console.WriteLine($"Total consuming time: {sw.ElapsedMilliseconds}");
     }
 
     private static IEnumerable<object> ConvertToSeriesRecords(ReadIngestionMessage message)

@@ -11,7 +11,7 @@ services:
       dockerfile: EmqxLearning.MqttListener/Dockerfile
     environment:
       Logging__LogLevel__Default: Warning
-      MqttClientOptions__TcpServer: node1.emqx.io
+      MqttClientOptions__TcpServer: localhost
       MqttClientOptions__CleanSession: true
       MqttClientOptions__ReconnectDelaySecs: 5
       MqttClientOptions__Topic: $$share/ahi/projectId/+/devices/+/telemetry
@@ -20,9 +20,8 @@ services:
       ProcessingTime: 50
       ProcessingThreads: 20
       BackgroundProcessing: true
-      RabbitMqClient__HostName: rabbitmq1
-    networks:
-      - emqx-bridge
+      RabbitMqClient__HostName: localhost
+    network_mode: host
     deploy:
       replicas: 3
       resources:
@@ -30,8 +29,6 @@ services:
           cpus: "0.5"
           memory: "50M"
     depends_on:
-      emqx1:
-        condition: service_healthy
       rabbitmq1:
         condition: service_healthy
 
@@ -42,17 +39,14 @@ services:
       context: .
       dockerfile: EmqxLearning.MqttPublisher/Dockerfile
     environment:
-      - MqttClientOptions__TcpServer=node1.emqx.io
+      - MqttClientOptions__TcpServer=localhost
       - MqttClientOptions__TopicFormat=projectId/{0}/devices/{1}/telemetry
     stdin_open: true
     tty: true
-    networks:
-      - emqx-bridge
+    network_mode: host
     deploy:
       replicas: 3
     depends_on:
-      emqx1:
-        condition: service_healthy
       rabbitmq1:
         condition: service_healthy
 
@@ -69,13 +63,12 @@ services:
       ProcessingTime: 0
       ConsumerCount: 3
       InsertDb: true
-      ConnectionStrings__DeviceDb: Maximum Pool Size=35;User ID=postgres;Password=zaQ@123456!;Host=timescaledb1;Port=5432;Database=device;Pooling=true;
-      RabbitMqClient__HostName: rabbitmq1
+      ConnectionStrings__DeviceDb: Maximum Pool Size=35;User ID=postgres;Password=zaQ@123456!;Host=localhost;Port=5432;Database=device;Pooling=true;
+      RabbitMqClient__HostName: localhost
       RabbitMqClient__DispatchConsumersAsync: true
       RabbitMqClient__ConsumerDispatchConcurrency: 750
       RabbitMqChannel__PrefetchCount: 1250
-    networks:
-      - emqx-bridge
+    network_mode: host
     deploy:
       replicas: 1
       resources:
@@ -133,7 +126,7 @@ services:
     image: emqx/emqx:5.6.0
     container_name: emqx1
     environment:
-      - "EMQX_NODE_NAME=emqx@node1.emqx.io"
+      - "EMQX_NODE_NAME=emqx@localhost"
       - "EMQX_MQTT__MAX_MQUEUE_LEN=1000000"
       - "EMQX_MQTT__MAX_INFLIGHT=128"
       # - "EMQX_CLUSTER__DISCOVERY_STRATEGY=static"
@@ -143,10 +136,7 @@ services:
       interval: 5s
       timeout: 25s
       retries: 5
-    networks:
-      emqx-bridge:
-        aliases:
-          - node1.emqx.io
+    network_mode: host
     ports:
       - 1883:1883
       - 8083:8083
@@ -186,8 +176,7 @@ services:
     volumes:
       - ./deployment/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
       - ./deployment/rabbitmq/rabbitmq-definitions.json:/etc/rabbitmq/definitions.json
-    networks:
-      - emqx-bridge
+    network_mode: host
     healthcheck:
       test: rabbitmq-diagnostics check_port_connectivity
       interval: 30s
@@ -196,7 +185,6 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "4"
           memory: "1024M"
 
   # TimescaleDB
@@ -233,8 +221,7 @@ services:
     environment:
       POSTGRES_PASSWORD: "zaQ@123456!"
       POSTGRES_DB: "device"
-    networks:
-      - emqx-bridge
+    network_mode: host
     deploy:
       replicas: 1
       resources:
@@ -249,9 +236,8 @@ services:
       - "10000:10000"
       - "10001:10001"
       - "10002:10002"
-    networks:
-      - emqx-bridge
+    network_mode: host
 
-networks:
-  emqx-bridge:
-    driver: bridge
+# networks:
+#   emqx-bridge:
+#     driver: host
