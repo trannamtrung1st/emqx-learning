@@ -62,14 +62,10 @@ public class Worker : BackgroundService
         var ingestionMessage = JsonSerializer.Deserialize<ReadIngestionMessage>(e.Body.ToArray());
         _logger.LogInformation("Metrics count {Count}", ingestionMessage.RawData.Count);
         var values = ConvertToSeriesRecords(ingestionMessage);
-        if (_configuration.GetValue<bool>("InsertDb"))
-        {
-            var startInsert = sw.ElapsedMilliseconds;
-            await InsertToDb(values);
-            var insertTime = sw.ElapsedMilliseconds - startInsert;
-            // Console.WriteLine($"Insert to DB: {insertTime}");
-        }
-        await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
+        var startInsert = sw.ElapsedMilliseconds;
+        await InsertToDb(values);
+        var insertTime = sw.ElapsedMilliseconds - startInsert;
+        // Console.WriteLine($"Insert to DB: {insertTime}");
         _rabbitMqChannel.BasicAck(e.DeliveryTag, false);
         sw.Stop();
         // Console.WriteLine($"Total consuming time: {sw.ElapsedMilliseconds}");
@@ -103,9 +99,16 @@ public class Worker : BackgroundService
     private async Task InsertToDb(IEnumerable<object> values)
     {
         await using NpgsqlConnection connection = await _dataSource.OpenConnectionAsync();
-        var inserted = await connection.ExecuteAsync(@"INSERT INTO device_metric_series(_ts, device_id, metric_key, value, retention_days)
+        if (_configuration.GetValue<bool>("InsertDb"))
+        {
+            var inserted = await connection.ExecuteAsync(@"INSERT INTO device_metric_series(_ts, device_id, metric_key, value, retention_days)
                                                        VALUES (@Timestamp, @DeviceId, @MetricKey, @Value, @RetentionDays);", values);
-        _logger.LogInformation("Records count: {Count}", inserted);
+            _logger.LogInformation("Records count: {Count}", inserted);
+        }
+        else
+        {
+            await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
+        }
     }
 
     public override void Dispose()
