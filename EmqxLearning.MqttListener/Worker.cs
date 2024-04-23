@@ -1,11 +1,13 @@
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
+using System.Threading.RateLimiting;
 using EmqxLearning.Shared.Models;
 using MQTTnet;
 using MQTTnet.Client;
 using MQTTnet.Extensions.ManagedClient;
 using RabbitMQ.Client;
+using EmqxLearning.Shared.Extensions;
 
 namespace EmqxLearning.MqttListener;
 
@@ -18,6 +20,7 @@ public class Worker : BackgroundService
     private readonly ConcurrentBag<IManagedMqttClient> _mqttClients;
     private MqttClientOptions _options;
     private ManagedMqttClientOptions _managedOptions;
+    private readonly RateLimiter _rateLimiter;
     private CancellationToken _stoppingToken;
     private static long _messageCount = 0;
 
@@ -32,6 +35,11 @@ public class Worker : BackgroundService
         var factory = rabbitMqClientOptions.Get<ConnectionFactory>();
         _rabbitMqConnection = factory.CreateConnection();
         _rabbitMqChannel = _rabbitMqConnection.CreateModel();
+        _rateLimiter = new ConcurrencyLimiter(new ConcurrencyLimiterOptions
+        {
+            PermitLimit = _configuration.GetValue<int>("ConcurrencyLimit"),
+            QueueLimit = 0
+        });
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -54,11 +62,10 @@ public class Worker : BackgroundService
             .WithTcpServer(_configuration["MqttClientOptions:TcpServer"])
             .WithCleanSession(value: _configuration.GetValue<bool>("MqttClientOptions:CleanSession"));
 
-        if (_configuration["MqttClientOptions:ClientId"] != null)
-        {
-            var clientId = $"{_configuration["MqttClientOptions:ClientId"]}_{threadIdx}";
-            optionsBuilder = optionsBuilder.WithClientId(clientId);
-        }
+        var clientId = _configuration["MqttClientOptions:ClientId"] != null
+            ? $"{_configuration["MqttClientOptions:ClientId"]}_{threadIdx}"
+            : $"mqtt-listener_{threadIdx}_{Guid.NewGuid()}";
+        optionsBuilder = optionsBuilder.WithClientId(clientId);
 
         _options = optionsBuilder.Build();
         _managedOptions = new ManagedMqttClientOptionsBuilder()
@@ -85,35 +92,31 @@ public class Worker : BackgroundService
 
     private async Task OnMessageReceivedNormal(MqttApplicationMessageReceivedEventArgs e)
     {
-        // _logger.LogInformation($"### RECEIVED APPLICATION MESSAGE ###\n"
-        // + $"+ Topic = {e.ApplicationMessage.Topic}\n"
-        // + $"+ Payload = {Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment)}\n"
-        // + $"+ QoS = {e.ApplicationMessage.QualityOfServiceLevel}\n"
-        // + $"+ Retain = {e.ApplicationMessage.Retain}\n");
         await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
         Interlocked.Increment(ref _messageCount);
         _logger.LogInformation("{messageCount}", _messageCount);
-        // _logger.LogInformation("Message processed done!");
     }
 
     private async Task OnMessageReceivedBackground(MqttApplicationMessageReceivedEventArgs e)
     {
-        var _ = Task.Run(() =>
+        var lease = await _rateLimiter.WaitToAcquire(_stoppingToken);
+        var _ = Task.Run(async () =>
         {
-            // _logger.LogInformation($"### RECEIVED APPLICATION MESSAGE ###\n"
-            // + $"+ Topic = {e.ApplicationMessage.Topic}\n"
-            // + $"+ Payload = {Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment)}\n"
-            // + $"+ QoS = {e.ApplicationMessage.QualityOfServiceLevel}\n"
-            // + $"+ Retain = {e.ApplicationMessage.Retain}\n");
-            // await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
-            var payloadStr = Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment);
-            var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(payloadStr);
-            var ingestionMessage = new IngestionMessage(payload);
-            SendIngestionMessage(ingestionMessage);
-            Interlocked.Increment(ref _messageCount);
-            _logger.LogInformation("{messageCount}", _messageCount);
-            // _logger.LogInformation("Message processed done!");
-            return Task.CompletedTask;
+            try
+            {
+                await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
+                var payloadStr = Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment);
+                var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(payloadStr);
+                var ingestionMessage = new IngestionMessage(payload);
+                SendIngestionMessage(ingestionMessage);
+                Interlocked.Increment(ref _messageCount);
+                _logger.LogInformation("{messageCount}", _messageCount);
+                return Task.CompletedTask;
+            }
+            finally
+            {
+                lease.Dispose();
+            }
         });
 
         await Task.Delay(_configuration.GetValue<int>("ReceiveDelay"));

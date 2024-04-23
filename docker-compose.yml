@@ -16,8 +16,9 @@ services:
       MqttClientOptions__ReconnectDelaySecs: 5
       MqttClientOptions__Topic: $$share/ahi/projectId/+/devices/+/telemetry
       MqttClientOptions__Qos: 1
-      ReceiveDelay: 3
-      ProcessingTime: 50
+      ReceiveDelay: 0
+      ProcessingTime: 0
+      ConcurrencyLimit: 100
       ProcessingThreads: 20
       BackgroundProcessing: true
       RabbitMqClient__HostName: rabbitmq1
