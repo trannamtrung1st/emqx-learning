@@ -210,32 +210,10 @@ services:
     image: "timescale/timescaledb-ha:pg14-arm64"
     ports:
       - "5432:5432"
-    command: postgres -c 'max_connections=5000'
-    #   -c 'autovacuum_analyze_scale_factor=0.02'
-    #   -c 'autovacuum_naptime=10s'
-    #   -c 'autovacuum_max_workers=10'
-    #   -c 'autovacuum_vacuum_cost_limit=500'
-    #   -c 'autovacuum_vacuum_scale_factor=0.05'
-    #   -c 'log_autovacuum_min_duration=1min'
-    #   -c 'hot_standby=true'
-    #   -c 'max_prepared_transactions=0'
-    #   -c 'max_locks_per_transaction=512'
-    #   -c 'effective_io_concurrency=256'
-    #   -c 'max_worker_processes=41'
-    #   -c 'max_parallel_workers=8'
-    #   -c 'shared_preload_libraries=timescaledb,pg_stat_statements'
-    #   -c 'tcp_keepalives_idle=900'
-    #   -c 'tcp_keepalives_interval=100'
-    #   -c 'temp_file_limit=50GB'
-    #   -c 'wal_level=hot_standby'
-    #   -c 'shared_buffers=10240MB'
-    #   -c 'min_wal_size=512MB'
-    #   -c 'max_wal_size=1024MB'
-    #   -c 'default_statistics_target=500'
-    #   -c 'max_parallel_maintenance_workers=4'
-    #   -c 'work_mem=10MB';
+    command: postgres -c 'config_file=/etc/postgresql/postgresql.conf'
     volumes:
       - ./deployment/timescaledb/scripts:/docker-entrypoint-initdb.d
+      - ./deployment/timescaledb/postgresql.conf:/etc/postgresql/postgresql.conf
     environment:
       POSTGRES_PASSWORD: "zaQ@123456!"
       POSTGRES_DB: "device"
