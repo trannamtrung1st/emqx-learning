@@ -1,0 +1,73 @@
+using System.Text.Json;
+using Dapper;
+using EmqxLearning.RabbitMqConsumer.Services.Abstracts;
+using EmqxLearning.Shared.Models;
+using Npgsql;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
+
+namespace EmqxLearning.RabbitMqConsumer.Services;
+
+public class IngestionService : IIngestionService
+{
+    private readonly IModel _rabbitMqChannel;
+    private readonly NpgsqlDataSource _dataSource;
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<IngestionService> _logger;
+    public IngestionService(
+        IModel rabbitMqChannel,
+        ILogger<IngestionService> logger,
+        IConfiguration configuration)
+    {
+        _rabbitMqChannel = rabbitMqChannel;
+        _logger = logger;
+        _configuration = configuration;
+        _dataSource = NpgsqlDataSource.Create(_configuration.GetConnectionString("DeviceDb"));
+    }
+
+    public async Task HandleMessage(BasicDeliverEventArgs e, CancellationToken cancellationToken)
+    {
+        var ingestionMessage = JsonSerializer.Deserialize<ReadIngestionMessage>(e.Body.ToArray());
+        _logger.LogInformation("Metrics count {Count}", ingestionMessage.RawData.Count);
+        var values = ConvertToSeriesRecords(ingestionMessage);
+        await InsertToDb(values);
+        _rabbitMqChannel.BasicAck(e.DeliveryTag, multiple: false);
+    }
+
+    private static IEnumerable<object> ConvertToSeriesRecords(ReadIngestionMessage message)
+    {
+        var data = message.RawData;
+        var timestamp = DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(data["timestamp"].ToString()));
+        var deviceId = data["deviceId"].ToString();
+        data.Remove("timestamp");
+        data.Remove("deviceId");
+        var values = new List<object>();
+        foreach (var kvp in message.RawData)
+        {
+            values.Add(new
+            {
+                Timestamp = timestamp,
+                DeviceId = deviceId,
+                MetricKey = kvp.Key,
+                Value = Random.Shared.NextDouble(),
+                RetentionDays = 90
+            });
+        }
+        return values;
+    }
+
+    private async Task InsertToDb(IEnumerable<object> values)
+    {
+        await using NpgsqlConnection connection = await _dataSource.OpenConnectionAsync();
+        if (_configuration.GetValue<bool>("InsertDb"))
+        {
+            var inserted = await connection.ExecuteAsync(@"INSERT INTO device_metric_series(_ts, device_id, metric_key, value, retention_days)
+                                                           VALUES (@Timestamp, @DeviceId, @MetricKey, @Value, @RetentionDays);", values);
+            _logger.LogInformation("Records count: {Count}", inserted);
+        }
+        else
+        {
+            await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
+        }
+    }
+}

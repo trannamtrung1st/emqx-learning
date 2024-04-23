@@ -69,6 +69,10 @@ services:
       ProcessingTime: 0
       ConsumerCount: 3
       InsertDb: true
+      BatchSettings__Enabled: false
+      BatchSettings__BatchInterval: 500
+      BatchSettings__BatchSize: 10000
+      BatchSettings__WorkerThreadCount: 5
       ConnectionStrings__DeviceDb: Maximum Pool Size=35;User ID=postgres;Password=zaQ@123456!;Host=timescaledb1;Port=5432;Database=device;Pooling=true;
       RabbitMqClient__HostName: rabbitmq1
       RabbitMqClient__DispatchConsumersAsync: true
