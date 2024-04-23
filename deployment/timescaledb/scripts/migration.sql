@@ -8,4 +8,4 @@ CREATE TABLE IF NOT EXISTS device_metric_series (
     retention_days int null default 90
 );
 
-SELECT create_hypertable('device_metric_series','_ts', 'device_id' ,4, chunk_time_interval => INTERVAL '1 day');
+SELECT create_hypertable('device_metric_series','_ts', 'device_id' ,4, chunk_time_interval => INTERVAL '2 minutes');

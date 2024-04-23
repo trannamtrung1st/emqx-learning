@@ -50,16 +50,23 @@ public class BatchIngestionService : IIngestionService
             var aTimer = new System.Timers.Timer(batchInterval);
             aTimer.Elapsed += async (s, e) =>
             {
-                if (_messages.Count == 0) return;
-                var batch = new List<ReadIngestionMessage>();
-                var deliveryTags = new List<ulong>();
-                while (batch.Count < batchSize && _messages.TryDequeue(out var message))
+                try
                 {
-                    batch.Add(message.Payload);
-                    deliveryTags.Add(message.EventArgs.DeliveryTag);
+                    if (_messages.Count == 0) return;
+                    var batch = new List<ReadIngestionMessage>();
+                    var deliveryTags = new List<ulong>();
+                    while (batch.Count < batchSize && _messages.TryDequeue(out var message))
+                    {
+                        batch.Add(message.Payload);
+                        deliveryTags.Add(message.EventArgs.DeliveryTag);
+                    }
+                    batch.Sort(comparer);
+                    await HandleBatch(batch, deliveryTags);
                 }
-                batch.Sort(comparer);
-                await HandleBatch(batch, deliveryTags);
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, ex.Message);
+                }
             };
             aTimer.AutoReset = true;
             aTimer.Enabled = true;
@@ -83,7 +90,6 @@ public class BatchIngestionService : IIngestionService
         foreach (var message in messages)
         {
             var data = message.RawData;
-            var timestamp = DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(data["timestamp"].ToString()));
             var deviceId = data["deviceId"].ToString();
             data.Remove("timestamp");
             data.Remove("deviceId");
@@ -91,7 +97,7 @@ public class BatchIngestionService : IIngestionService
             foreach (var kvp in message.RawData)
             {
                 writer.StartRow();
-                writer.Write(timestamp.DateTime, NpgsqlTypes.NpgsqlDbType.Timestamp);
+                writer.Write(DateTime.Now, NpgsqlTypes.NpgsqlDbType.Timestamp);
                 writer.Write(deviceId);
                 writer.Write(kvp.Key);
                 writer.Write(Random.Shared.NextDouble(), NpgsqlTypes.NpgsqlDbType.Numeric);

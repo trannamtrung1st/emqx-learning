@@ -37,7 +37,6 @@ public class IngestionService : IIngestionService
     private static IEnumerable<object> ConvertToSeriesRecords(ReadIngestionMessage message)
     {
         var data = message.RawData;
-        var timestamp = DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(data["timestamp"].ToString()));
         var deviceId = data["deviceId"].ToString();
         data.Remove("timestamp");
         data.Remove("deviceId");
@@ -46,7 +45,7 @@ public class IngestionService : IIngestionService
         {
             values.Add(new
             {
-                Timestamp = timestamp,
+                Timestamp = DateTime.Now,
                 DeviceId = deviceId,
                 MetricKey = kvp.Key,
                 Value = Random.Shared.NextDouble(),
