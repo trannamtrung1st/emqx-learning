@@ -16,6 +16,16 @@ var interval = GetArgument<int>(args, "I");
 var tcpServer = GetRawEnv("MqttClientOptions__TcpServer");
 var topicFormat = GetRawEnv("MqttClientOptions__TopicFormat");
 var messagePayload = GetRawArgument(args, "m");
+if (messagePayload == null)
+{
+    var dict = new Dictionary<string, object>();
+    dict["deviceId"] = "device-large-payload";
+    dict["timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    for (int i = 0; i < 50; i++)
+        dict[$"numeric{i}"] = Random.Shared.NextDouble();
+    dict["text"] = new string('*', 2500);
+    messagePayload = JsonSerializer.Serialize(dict);
+}
 var qos = GetArgument<MqttQualityOfServiceLevel>(args, "q");
 var factory = new MqttFactory();
 Console.WriteLine("Setup ...");
@@ -58,12 +68,14 @@ static string GetRawEnv(string varName) => Environment.GetEnvironmentVariable(va
 static T GetArgument<T>(string[] args, string argName)
 {
     var value = GetRawArgument(args, argName);
+    if (value == null) return default;
     return JsonSerializer.Deserialize<T>(value);
 }
 
 static string GetRawArgument(string[] args, string argName)
 {
     var arg = args.FirstOrDefault(a => a.StartsWith($"-{argName}="));
+    if (arg == null) return null;
     var value = arg[(arg.IndexOf('=') + 1)..];
     return value;
 }
