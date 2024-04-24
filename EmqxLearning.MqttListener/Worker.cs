@@ -108,6 +108,7 @@ public class Worker : BackgroundService
 
     private async Task OnMessageReceivedBackground(MqttApplicationMessageReceivedEventArgs e)
     {
+        e.AutoAcknowledge = false;
         var lease = await _rateLimiter.WaitToAcquire(_stoppingToken);
         var _ = Task.Run(async () =>
         {
@@ -120,7 +121,7 @@ public class Worker : BackgroundService
                 SendIngestionMessage(ingestionMessage);
                 Interlocked.Increment(ref _messageCount);
                 _logger.LogInformation("{messageCount}", _messageCount);
-                return Task.CompletedTask;
+                await e.AcknowledgeAsync(_stoppingToken);
             }
             finally
             {
