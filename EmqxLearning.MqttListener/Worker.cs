@@ -8,6 +8,8 @@ using MQTTnet.Client;
 using MQTTnet.Extensions.ManagedClient;
 using RabbitMQ.Client;
 using EmqxLearning.Shared.Extensions;
+using DeviceId;
+using MQTTnet.Formatter;
 
 namespace EmqxLearning.MqttListener;
 
@@ -58,13 +60,20 @@ public class Worker : BackgroundService
         var factory = new MqttFactory();
         var mqttClient = factory.CreateManagedMqttClient();
         _mqttClients.Add(mqttClient);
+        var mqttClientConfiguration = _configuration.GetSection("MqttClientOptions");
         var optionsBuilder = new MqttClientOptionsBuilder()
-            .WithTcpServer(_configuration["MqttClientOptions:TcpServer"])
-            .WithCleanSession(value: _configuration.GetValue<bool>("MqttClientOptions:CleanSession"));
+            .WithTcpServer(mqttClientConfiguration["TcpServer"])
+            .WithCleanSession(value: mqttClientConfiguration.GetValue<bool>("CleanSession"))
+            .WithSessionExpiryInterval(mqttClientConfiguration.GetValue<uint>("SessionExpiryInterval"))
+            .WithProtocolVersion(MqttProtocolVersion.V500);
+        string deviceId = new DeviceIdBuilder()
+            .AddMachineName()
+            .AddOsVersion()
+            .ToString();
 
         var clientId = _configuration["MqttClientOptions:ClientId"] != null
             ? $"{_configuration["MqttClientOptions:ClientId"]}_{threadIdx}"
-            : $"mqtt-listener_{threadIdx}_{Guid.NewGuid()}";
+            : $"mqtt-listener_{deviceId}_{threadIdx}";
         optionsBuilder = optionsBuilder.WithClientId(clientId);
 
         _options = optionsBuilder.Build();
