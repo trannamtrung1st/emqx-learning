@@ -10,11 +10,14 @@ using RabbitMQ.Client;
 using EmqxLearning.Shared.Extensions;
 using DeviceId;
 using MQTTnet.Formatter;
+using Polly.Registry;
+using Polly;
 
 namespace EmqxLearning.MqttListener;
 
 public class Worker : BackgroundService
 {
+    private static long _messageCount = 0;
     private readonly ILogger<Worker> _logger;
     private readonly IConfiguration _configuration;
     private readonly IConnection _rabbitMqConnection;
@@ -24,10 +27,12 @@ public class Worker : BackgroundService
     private ManagedMqttClientOptions _managedOptions;
     private readonly RateLimiter _rateLimiter;
     private CancellationToken _stoppingToken;
-    private static long _messageCount = 0;
+    private readonly ResiliencePipeline _connectionErrorsPipeline;
+    private readonly ResiliencePipeline _transientErrorsPipeline;
 
     public Worker(ILogger<Worker> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        ResiliencePipelineProvider<string> resiliencePipelineProvider)
     {
         _logger = logger;
         _configuration = configuration;
@@ -42,6 +47,9 @@ public class Worker : BackgroundService
             PermitLimit = _configuration.GetValue<int>("ConcurrencyLimit"),
             QueueLimit = 0
         });
+
+        _connectionErrorsPipeline = resiliencePipelineProvider.GetPipeline(Constants.ResiliencePipelines.ConnectionErrors);
+        _transientErrorsPipeline = resiliencePipelineProvider.GetPipeline(Constants.ResiliencePipelines.TransientErrors);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -91,12 +99,22 @@ public class Worker : BackgroundService
     private async Task OnConnected(MqttClientConnectedEventArgs e, IManagedMqttClient mqttClient)
     {
         _logger.LogInformation("### CONNECTED WITH SERVER - ClientId: {0} ###", mqttClient.Options.ClientOptions.ClientId);
-
         var topic = _configuration["MqttClientOptions:Topic"];
         var qos = _configuration.GetValue<MQTTnet.Protocol.MqttQualityOfServiceLevel>("MqttClientOptions:QoS");
-        await mqttClient.SubscribeAsync(topic: topic, qualityOfServiceLevel: qos);
 
-        _logger.LogInformation("### SUBSCRIBED topic {0} - qos {1} ###", topic, qos);
+        await _connectionErrorsPipeline.ExecuteAsync(async (token) =>
+        {
+            try
+            {
+                await mqttClient.SubscribeAsync(topic: topic, qualityOfServiceLevel: qos);
+                _logger.LogInformation("### SUBSCRIBED topic {0} - qos {1} ###", topic, qos);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, ex.Message);
+                throw;
+            }
+        }, cancellationToken: _stoppingToken);
     }
 
     private async Task OnMessageReceivedNormal(MqttApplicationMessageReceivedEventArgs e)
@@ -108,28 +126,43 @@ public class Worker : BackgroundService
 
     private async Task OnMessageReceivedBackground(MqttApplicationMessageReceivedEventArgs e)
     {
-        e.AutoAcknowledge = false;
-        var lease = await _rateLimiter.WaitToAcquire(_stoppingToken);
-        var _ = Task.Run(async () =>
+        try
         {
-            try
-            {
-                await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
-                var payloadStr = Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment);
-                var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(payloadStr);
-                var ingestionMessage = new IngestionMessage(payload);
-                SendIngestionMessage(ingestionMessage);
-                Interlocked.Increment(ref _messageCount);
-                _logger.LogInformation("{messageCount}", _messageCount);
-                await e.AcknowledgeAsync(_stoppingToken);
-            }
-            finally
-            {
-                lease.Dispose();
-            }
-        });
+            e.AutoAcknowledge = false;
+            var lease = await _rateLimiter.WaitToAcquire(_stoppingToken);
+            var _ = Task.Run(() => HandleMessage(e, lease));
+            await Task.Delay(_configuration.GetValue<int>("ReceiveDelay"));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, ex.Message);
+        }
+    }
 
-        await Task.Delay(_configuration.GetValue<int>("ReceiveDelay"));
+    private async Task HandleMessage(MqttApplicationMessageReceivedEventArgs e, RateLimitLease lease)
+    {
+        try
+        {
+            await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
+            var payloadStr = Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment);
+            var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(payloadStr);
+            var ingestionMessage = new IngestionMessage(payload);
+            SendIngestionMessage(ingestionMessage);
+            Interlocked.Increment(ref _messageCount);
+            _logger.LogInformation("{messageCount}", _messageCount);
+
+            await _transientErrorsPipeline.ExecuteAsync(
+                async (token) => await e.AcknowledgeAsync(token),
+                _stoppingToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, ex.Message);
+        }
+        finally
+        {
+            lease.Dispose();
+        }
     }
 
     private Task OnDisconnected(MqttClientDisconnectedEventArgs e)
@@ -145,10 +178,13 @@ public class Worker : BackgroundService
         properties.Persistent = true;
         properties.ContentType = "application/json";
         var bytes = JsonSerializer.SerializeToUtf8Bytes(ingestionMessage);
-        _rabbitMqChannel.BasicPublish(exchange: ingestionMessage.TopicName,
-            routingKey: "all",
-            basicProperties: properties,
-            body: bytes);
+        _transientErrorsPipeline.Execute(() =>
+        {
+            _rabbitMqChannel.BasicPublish(exchange: ingestionMessage.TopicName,
+                routingKey: "all",
+                basicProperties: properties,
+                body: bytes);
+        });
     }
 
     public override void Dispose()
