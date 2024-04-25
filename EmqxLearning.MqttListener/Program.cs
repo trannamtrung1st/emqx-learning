@@ -19,7 +19,7 @@ IServiceCollection SetupResilience(IServiceCollection services, IConfiguration r
 {
     const string ConnectionErrorsKey = Constants.ResiliencePipelines.ConnectionErrors;
     const string TransientErrorsKey = Constants.ResiliencePipelines.TransientErrors;
-    return services.AddSingleton(provider =>
+    return services.AddSingleton<ResiliencePipelineProvider<string>>(provider =>
     {
         var registry = new ResiliencePipelineRegistry<string>();
         registry.TryAddBuilder(ConnectionErrorsKey, (builder, _) =>
