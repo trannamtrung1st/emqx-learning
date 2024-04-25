@@ -1,10 +1,13 @@
 using EmqxLearning.RabbitMqConsumer;
 using EmqxLearning.RabbitMqConsumer.Services;
 using EmqxLearning.RabbitMqConsumer.Services.Abstracts;
+using Polly;
 using RabbitMQ.Client;
+using Constants = EmqxLearning.RabbitMqConsumer.Constants;
+using EmqxLearning.Shared.Extensions;
 
 IHost host = Host.CreateDefaultBuilder(args)
-    .ConfigureServices(services =>
+    .ConfigureServices((context, services) =>
     {
         services.AddHostedService<Worker>();
         services.AddSingleton((provider) =>
@@ -40,6 +43,26 @@ IHost host = Host.CreateDefaultBuilder(args)
             return useBatchInsert
                 ? provider.GetRequiredService<BatchIngestionService>()
                 : provider.GetRequiredService<IngestionService>();
+        });
+
+        var configuration = context.Configuration;
+        var resilienceSettings = configuration.GetSection("ResilienceSettings");
+
+        const string ConnectionErrorsKey = Constants.ResiliencePipelines.ConnectionErrors;
+        services.AddResiliencePipeline<string, object>(ConnectionErrorsKey, builder =>
+        {
+            builder.AddDefaultRetry(
+                retryAttempts: resilienceSettings.GetValue<int?>($"{ConnectionErrorsKey}:RetryAttempts") ?? int.MaxValue,
+                delaySecs: resilienceSettings.GetValue<int>($"{ConnectionErrorsKey}:DelaySecs")
+            );
+        });
+        const string TransientErrorsKey = Constants.ResiliencePipelines.TransientErrors;
+        services.AddResiliencePipeline<string, object>(TransientErrorsKey, builder =>
+        {
+            builder.AddDefaultRetry(
+                retryAttempts: resilienceSettings.GetValue<int>($"{TransientErrorsKey}:RetryAttempts"),
+                delaySecs: resilienceSettings.GetValue<int>($"{TransientErrorsKey}:DelaySecs")
+            );
         });
     })
     .Build();

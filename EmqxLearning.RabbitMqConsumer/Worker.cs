@@ -1,4 +1,6 @@
 using EmqxLearning.RabbitMqConsumer.Services.Abstracts;
+using Polly;
+using Polly.Registry;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
@@ -11,16 +13,20 @@ public class Worker : BackgroundService
     private readonly IModel _rabbitMqChannel;
     private readonly IIngestionService _ingestionService;
     private CancellationToken _stoppingToken;
+    private readonly ResiliencePipeline _connectionErrorsPipeline;
 
     public Worker(ILogger<Worker> logger,
         IConfiguration configuration,
         IModel rabbitMqChannel,
-        IIngestionService ingestionService)
+        IIngestionService ingestionService,
+        ResiliencePipelineProvider<string> resiliencePipelineProvider)
     {
         _ingestionService = ingestionService;
         _rabbitMqChannel = rabbitMqChannel;
         _logger = logger;
         _configuration = configuration;
+
+        _connectionErrorsPipeline = resiliencePipelineProvider.GetPipeline(Constants.ResiliencePipelines.ConnectionErrors);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -32,7 +38,8 @@ public class Worker : BackgroundService
         {
             var consumer = new AsyncEventingBasicConsumer(_rabbitMqChannel);
             consumer.Received += OnMessageReceived;
-            _rabbitMqChannel.BasicConsume(queue: "ingestion", autoAck: false, consumer: consumer);
+            _connectionErrorsPipeline.Execute(() =>
+                _rabbitMqChannel.BasicConsume(queue: "ingestion", autoAck: false, consumer: consumer));
         }
 
         while (!stoppingToken.IsCancellationRequested)
