@@ -7,7 +7,6 @@ using Constants = EmqxLearning.RabbitMqConsumer.Constants;
 using EmqxLearning.Shared.Extensions;
 using Polly.Registry;
 using RabbitMQ.Client.Exceptions;
-using RabbitMQ.Client.Events;
 
 IHost host = Host.CreateDefaultBuilder(args)
     .ConfigureServices((context, services) =>
@@ -28,9 +27,35 @@ IHost host = Host.CreateDefaultBuilder(args)
 
         var configuration = context.Configuration;
         var resilienceSettings = configuration.GetSection("ResilienceSettings");
+        SetupResilience(services, resilienceSettings);
+    })
+    .Build();
 
-        const string InitialConnectionErrorsKey = Constants.ResiliencePipelines.InitialConnectionErrors;
-        services.AddResiliencePipeline<string, object>(InitialConnectionErrorsKey, builder =>
+await host.RunAsync();
+
+IServiceCollection SetupResilience(IServiceCollection services, IConfiguration resilienceSettings)
+{
+    const string InitialConnectionErrorsKey = Constants.ResiliencePipelines.InitialConnectionErrors;
+    const string ConnectionErrorsKey = Constants.ResiliencePipelines.ConnectionErrors;
+    const string TransientErrorsKey = Constants.ResiliencePipelines.TransientErrors;
+    return services.AddSingleton<ResiliencePipelineProvider<string>>(provider =>
+    {
+        var registry = new ResiliencePipelineRegistry<string>();
+        registry.TryAddBuilder(ConnectionErrorsKey, (builder, _) =>
+        {
+            builder.AddDefaultRetry(
+                retryAttempts: resilienceSettings.GetValue<int?>($"{ConnectionErrorsKey}:RetryAttempts") ?? int.MaxValue,
+                delaySecs: resilienceSettings.GetValue<int>($"{ConnectionErrorsKey}:DelaySecs")
+            );
+        });
+        registry.TryAddBuilder(TransientErrorsKey, (builder, _) =>
+        {
+            builder.AddDefaultRetry(
+                retryAttempts: resilienceSettings.GetValue<int>($"{TransientErrorsKey}:RetryAttempts"),
+                delaySecs: resilienceSettings.GetValue<int>($"{TransientErrorsKey}:DelaySecs")
+            );
+        });
+        registry.TryAddBuilder(InitialConnectionErrorsKey, (builder, _) =>
         {
             builder.AddDefaultRetry(
                 retryAttempts: resilienceSettings.GetValue<int?>($"{InitialConnectionErrorsKey}:RetryAttempts") ?? int.MaxValue,
@@ -38,26 +63,9 @@ IHost host = Host.CreateDefaultBuilder(args)
                 shouldHandle: new PredicateBuilder().Handle<BrokerUnreachableException>()
             );
         });
-        const string ConnectionErrorsKey = Constants.ResiliencePipelines.ConnectionErrors;
-        services.AddResiliencePipeline<string, object>(ConnectionErrorsKey, builder =>
-        {
-            builder.AddDefaultRetry(
-                retryAttempts: resilienceSettings.GetValue<int?>($"{ConnectionErrorsKey}:RetryAttempts") ?? int.MaxValue,
-                delaySecs: resilienceSettings.GetValue<int>($"{ConnectionErrorsKey}:DelaySecs")
-            );
-        });
-        const string TransientErrorsKey = Constants.ResiliencePipelines.TransientErrors;
-        services.AddResiliencePipeline<string, object>(TransientErrorsKey, builder =>
-        {
-            builder.AddDefaultRetry(
-                retryAttempts: resilienceSettings.GetValue<int>($"{TransientErrorsKey}:RetryAttempts"),
-                delaySecs: resilienceSettings.GetValue<int>($"{TransientErrorsKey}:DelaySecs")
-            );
-        });
-    })
-    .Build();
-
-await host.RunAsync();
+        return registry;
+    });
+}
 
 IConnection SetupRabbitMqConnection(IServiceProvider provider)
 {

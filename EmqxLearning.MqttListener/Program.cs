@@ -1,31 +1,41 @@
 using EmqxLearning.MqttListener;
-using Polly;
 using EmqxLearning.Shared.Extensions;
+using Polly.Registry;
 
 IHost host = Host.CreateDefaultBuilder(args)
     .ConfigureServices((context, services) =>
     {
-        var configuration = context.Configuration;
-        var resilienceSettings = configuration.GetSection("ResilienceSettings");
         services.AddHostedService<Worker>();
 
-        const string ConnectionErrorsKey = Constants.ResiliencePipelines.ConnectionErrors;
-        services.AddResiliencePipeline<string, object>(ConnectionErrorsKey, builder =>
+        var configuration = context.Configuration;
+        var resilienceSettings = configuration.GetSection("ResilienceSettings");
+        SetupResilience(services, resilienceSettings);
+    })
+    .Build();
+
+await host.RunAsync();
+
+IServiceCollection SetupResilience(IServiceCollection services, IConfiguration resilienceSettings)
+{
+    const string ConnectionErrorsKey = Constants.ResiliencePipelines.ConnectionErrors;
+    const string TransientErrorsKey = Constants.ResiliencePipelines.TransientErrors;
+    return services.AddSingleton(provider =>
+    {
+        var registry = new ResiliencePipelineRegistry<string>();
+        registry.TryAddBuilder(ConnectionErrorsKey, (builder, _) =>
         {
             builder.AddDefaultRetry(
                 retryAttempts: resilienceSettings.GetValue<int?>($"{ConnectionErrorsKey}:RetryAttempts") ?? int.MaxValue,
                 delaySecs: resilienceSettings.GetValue<int>($"{ConnectionErrorsKey}:DelaySecs")
             );
         });
-        const string TransientErrorsKey = Constants.ResiliencePipelines.TransientErrors;
-        services.AddResiliencePipeline<string, object>(TransientErrorsKey, builder =>
+        registry.TryAddBuilder(TransientErrorsKey, (builder, _) =>
         {
             builder.AddDefaultRetry(
                 retryAttempts: resilienceSettings.GetValue<int>($"{TransientErrorsKey}:RetryAttempts"),
                 delaySecs: resilienceSettings.GetValue<int>($"{TransientErrorsKey}:DelaySecs")
             );
         });
-    })
-    .Build();
-
-await host.RunAsync();
+        return registry;
+    });
+}
