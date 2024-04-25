@@ -114,15 +114,9 @@ IModel SetupRabbitMqChannel(IServiceProvider provider)
 void OnModelShutdown(object sender, ShutdownEventArgs e, ILogger<Worker> logger)
 {
     if (e.Exception != null)
-    {
         logger.LogError(e.Exception, "RabbitMQ channel shutdown reason: {Reason} | Message: {Message}", e.Cause, e.Exception?.Message);
-        // Since model shutdown is application-level exception, it's useless to apply retrying
-        Environment.Exit(1);
-    }
     else
-    {
         logger.LogInformation("RabbitMQ channel shutdown reason: {Reason}", e.Cause);
-    }
 }
 
 void OnConnectionShutdown(object sender, ShutdownEventArgs e, ILogger<Worker> logger)

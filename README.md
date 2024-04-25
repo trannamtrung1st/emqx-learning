@@ -22,3 +22,11 @@ from pg_stat_activity
 where datname = 'device'
 and query like '%INSERT INTO device_metric_series%';
 ```
++ To disconnect container from network
+```sh
+docker network disconnect emqx-learning_emqx-bridge {container-id}
+```
++ To connect container to network
+```sh
+docker network connect --alias {alias} emqx-learning_emqx-bridge {container-id}
+```
