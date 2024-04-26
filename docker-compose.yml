@@ -13,7 +13,7 @@ services:
       Logging__LogLevel__Default: Warning
       MqttClientOptions__TcpServer: node1.emqx.io
       MqttClientOptions__CleanSession: false
-      MqttClientOptions__SessionExpiryInterval: 60
+      MqttClientOptions__SessionExpiryInterval: 120
       MqttClientOptions__ReconnectDelaySecs: 3
       MqttClientOptions__Topic: $$share/ahi/projectId/+/devices/+/telemetry
       MqttClientOptions__Qos: 1

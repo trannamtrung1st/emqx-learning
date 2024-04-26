@@ -1,17 +1,15 @@
 using EmqxLearning.MqttListener;
 using EmqxLearning.Shared.Extensions;
-using Polly;
+using EmqxLearning.Shared.Services.Abstracts;
 using Polly.Registry;
 using RabbitMQ.Client;
-using RabbitMQ.Client.Exceptions;
 using Constants = EmqxLearning.MqttListener.Constants;
 
 IHost host = Host.CreateDefaultBuilder(args)
     .ConfigureServices((context, services) =>
     {
         services.AddHostedService<Worker>();
-        services.AddSingleton((provider) => SetupRabbitMqConnection(provider));
-        services.AddSingleton((provider) => SetupRabbitMqChannel(provider));
+        SetupRabbitMq(services, context.Configuration);
 
         var configuration = context.Configuration;
         var resilienceSettings = configuration.GetSection("ResilienceSettings");
@@ -19,11 +17,12 @@ IHost host = Host.CreateDefaultBuilder(args)
     })
     .Build();
 
+ConnectRabbitMq(host.Services);
+
 await host.RunAsync();
 
 IServiceCollection SetupResilience(IServiceCollection services, IConfiguration resilienceSettings)
 {
-    const string InitialConnectionErrorsKey = Constants.ResiliencePipelines.InitialConnectionErrors;
     const string ConnectionErrorsKey = Constants.ResiliencePipelines.ConnectionErrors;
     const string TransientErrorsKey = Constants.ResiliencePipelines.TransientErrors;
     return services.AddSingleton<ResiliencePipelineProvider<string>>(provider =>
@@ -43,50 +42,50 @@ IServiceCollection SetupResilience(IServiceCollection services, IConfiguration r
                 delaySecs: resilienceSettings.GetValue<int>($"{TransientErrorsKey}:DelaySecs")
             );
         });
-        registry.TryAddBuilder(InitialConnectionErrorsKey, (builder, _) =>
-        {
-            builder.AddDefaultRetry(
-                retryAttempts: resilienceSettings.GetValue<int?>($"{InitialConnectionErrorsKey}:RetryAttempts") ?? int.MaxValue,
-                delaySecs: resilienceSettings.GetValue<int>($"{InitialConnectionErrorsKey}:DelaySecs"),
-                shouldHandle: new PredicateBuilder().Handle<BrokerUnreachableException>()
-            );
-        });
         return registry;
     });
 }
 
-IConnection SetupRabbitMqConnection(IServiceProvider provider)
+void ConnectRabbitMq(IServiceProvider provider)
 {
-    var logger = provider.GetRequiredService<ILogger<Worker>>();
     var pipelineProvider = provider.GetRequiredService<ResiliencePipelineProvider<string>>();
-    var initialConnectionErrorsPipeline = pipelineProvider.GetPipeline(Constants.ResiliencePipelines.InitialConnectionErrors);
-    var configuration = provider.GetRequiredService<IConfiguration>();
-    var rabbitMqClientOptions = configuration.GetSection("RabbitMqClient");
-    var factory = rabbitMqClientOptions.Get<ConnectionFactory>();
-    IConnection rabbitMqConnection = null;
-    initialConnectionErrorsPipeline.Execute(() =>
-    {
-        try
-        {
-            rabbitMqConnection = factory.CreateConnection();
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, ex.Message);
-            throw;
-        }
-    });
-    rabbitMqConnection.ConnectionShutdown += (sender, e) => OnConnectionShutdown(sender, e, logger);
-    return rabbitMqConnection;
+    var connectionPipeline = pipelineProvider.GetPipeline(Constants.ResiliencePipelines.ConnectionErrors);
+    var rabbitMqConnectionManager = provider.GetRequiredService<IRabbitMqConnectionManager>();
+    connectionPipeline.Execute(() => rabbitMqConnectionManager.Connect());
 }
 
-IModel SetupRabbitMqChannel(IServiceProvider provider)
+void SetupRabbitMq(IServiceCollection services, IConfiguration configuration)
+{
+    var rabbitMqClientOptions = configuration.GetSection("RabbitMqClient");
+    var factory = rabbitMqClientOptions.Get<ConnectionFactory>();
+
+    services.AddRabbitMqConnectionManager(
+        connectionFactory: factory,
+        configureConnectionFactory: SetupRabbitMqConnection,
+        configureChannelFactory: SetupRabbitMqChannel
+    );
+}
+
+Action<IConnection> SetupRabbitMqConnection(IServiceProvider provider)
 {
     var logger = provider.GetRequiredService<ILogger<Worker>>();
-    var rabbitMqConnection = provider.GetRequiredService<IConnection>();
-    var rabbitMqChannel = rabbitMqConnection.CreateModel();
-    rabbitMqChannel.ModelShutdown += (sender, e) => OnModelShutdown(sender, e, logger);
-    return rabbitMqChannel;
+    Action<IConnection> configureConnection = (connection) =>
+    {
+        connection.ConnectionShutdown += (sender, e) => OnConnectionShutdown(sender, e, logger);
+    };
+    return configureConnection;
+}
+
+Action<IModel> SetupRabbitMqChannel(IServiceProvider provider)
+{
+    var logger = provider.GetRequiredService<ILogger<Worker>>();
+    var configuration = provider.GetRequiredService<IConfiguration>();
+    Action<IModel> configureChannel = (channel) =>
+    {
+        channel.ContinuationTimeout = configuration.GetValue<TimeSpan?>("RabbitMqChannel:ContinuationTimeout") ?? channel.ContinuationTimeout;
+        channel.ModelShutdown += (sender, e) => OnModelShutdown(sender, e, logger);
+    };
+    return configureChannel;
 }
 
 void OnModelShutdown(object sender, ShutdownEventArgs e, ILogger<Worker> logger)

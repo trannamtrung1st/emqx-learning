@@ -12,15 +12,17 @@ using DeviceId;
 using MQTTnet.Formatter;
 using Polly.Registry;
 using Polly;
+using EmqxLearning.Shared.Services.Abstracts;
 
 namespace EmqxLearning.MqttListener;
 
 public class Worker : BackgroundService
 {
+    private const int DefaultLockSeconds = 3;
     private static long _messageCount = 0;
     private readonly ILogger<Worker> _logger;
     private readonly IConfiguration _configuration;
-    private readonly IModel _rabbitMqChannel;
+    private readonly IRabbitMqConnectionManager _rabbitMqConnectionManager;
     private readonly ConcurrentBag<IManagedMqttClient> _mqttClients;
     private MqttClientOptions _options;
     private ManagedMqttClientOptions _managedOptions;
@@ -29,16 +31,19 @@ public class Worker : BackgroundService
     private readonly ResiliencePipeline _connectionErrorsPipeline;
     private readonly ResiliencePipeline _transientErrorsPipeline;
 
+    private static readonly SemaphoreSlim _circuitLock = new SemaphoreSlim(initialCount: 1);
+    private bool _isCircuitOpen;
+
     public Worker(ILogger<Worker> logger,
         IConfiguration configuration,
         ResiliencePipelineProvider<string> resiliencePipelineProvider,
-        IModel rabbitMqChannel)
+        IRabbitMqConnectionManager rabbitMqConnectionManager)
     {
         _logger = logger;
         _configuration = configuration;
         _mqttClients = new ConcurrentBag<IManagedMqttClient>();
 
-        _rabbitMqChannel = rabbitMqChannel;
+        _rabbitMqConnectionManager = rabbitMqConnectionManager;
         _rateLimiter = new ConcurrencyLimiter(new ConcurrencyLimiterOptions
         {
             PermitLimit = _configuration.GetValue<int>("ConcurrencyLimit"),
@@ -52,14 +57,39 @@ public class Worker : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _stoppingToken = stoppingToken;
+
         var maxThreads = _configuration.GetValue<int>("ProcessingThreads");
         for (int i = 0; i < maxThreads; i++)
-            await Initialize(i);
+            await InitializeMqttClient(i);
+
         while (!stoppingToken.IsCancellationRequested)
             await Task.Delay(1000, stoppingToken);
     }
 
-    private async Task Initialize(int threadIdx)
+    private async Task StartMqttClients()
+    {
+        foreach (var mqttClient in _mqttClients)
+        {
+            await _connectionErrorsPipeline.ExecuteAsync(async (token) =>
+            {
+                try { await mqttClient.StartAsync(mqttClient.Options); }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("Restarting MQTT client {ClientId} failed, reason: {Message}",
+                        mqttClient.Options.ClientOptions.ClientId,
+                        ex.Message);
+                }
+            });
+        }
+    }
+
+    private async Task StopMqttClients()
+    {
+        foreach (var mqttClient in _mqttClients)
+            await mqttClient.StopAsync();
+    }
+
+    private async Task InitializeMqttClient(int threadIdx)
     {
         var backgroundProcessing = _configuration.GetValue<bool>("BackgroundProcessing");
         var factory = new MqttFactory();
@@ -90,7 +120,8 @@ public class Worker : BackgroundService
         mqttClient.ConnectedAsync += (e) => OnConnected(e, mqttClient);
         mqttClient.DisconnectedAsync += OnDisconnected;
         mqttClient.ApplicationMessageReceivedAsync += backgroundProcessing ? OnMessageReceivedBackground : OnMessageReceivedNormal;
-        await mqttClient.StartAsync(_managedOptions);
+        await _connectionErrorsPipeline.ExecuteAsync(async (token) =>
+            await mqttClient.StartAsync(_managedOptions));
     }
 
     private async Task OnConnected(MqttClientConnectedEventArgs e, IManagedMqttClient mqttClient)
@@ -108,7 +139,7 @@ public class Worker : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, ex.Message);
+                _logger.LogError(ex, "Subscribing MQTT topic failed, reason: {Message}", ex.Message);
                 throw;
             }
         }, cancellationToken: _stoppingToken);
@@ -127,7 +158,12 @@ public class Worker : BackgroundService
         {
             e.AutoAcknowledge = false;
             var lease = await _rateLimiter.WaitToAcquire(_stoppingToken);
-            var _ = Task.Run(() => HandleMessage(e, lease));
+            var _ = Task.Run(async () =>
+            {
+                try { await HandleMessage(e); }
+                catch (Exception ex) { _logger.LogError(ex, ex.Message); }
+                finally { lease.Dispose(); }
+            });
             await Task.Delay(_configuration.GetValue<int>("ReceiveDelay"));
         }
         catch (Exception ex)
@@ -136,30 +172,19 @@ public class Worker : BackgroundService
         }
     }
 
-    private async Task HandleMessage(MqttApplicationMessageReceivedEventArgs e, RateLimitLease lease)
+    private async Task HandleMessage(MqttApplicationMessageReceivedEventArgs e)
     {
-        try
-        {
-            await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
-            var payloadStr = Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment);
-            var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(payloadStr);
-            var ingestionMessage = new IngestionMessage(payload);
-            SendIngestionMessage(ingestionMessage);
-            Interlocked.Increment(ref _messageCount);
-            _logger.LogInformation("{messageCount}", _messageCount);
+        await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
+        var payloadStr = Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment);
+        var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(payloadStr);
+        var ingestionMessage = new IngestionMessage(payload);
+        await SendIngestionMessage(ingestionMessage);
+        Interlocked.Increment(ref _messageCount);
+        _logger.LogInformation("{messageCount}", _messageCount);
 
-            await _transientErrorsPipeline.ExecuteAsync(
-                async (token) => await e.AcknowledgeAsync(token),
-                _stoppingToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, ex.Message);
-        }
-        finally
-        {
-            lease.Dispose();
-        }
+        await _transientErrorsPipeline.ExecuteAsync(
+            async (token) => await e.AcknowledgeAsync(token),
+            _stoppingToken);
     }
 
     private Task OnDisconnected(MqttClientDisconnectedEventArgs e)
@@ -169,26 +194,84 @@ public class Worker : BackgroundService
         return Task.CompletedTask;
     }
 
-    private void SendIngestionMessage(IngestionMessage ingestionMessage)
+    private async Task SendIngestionMessage(IngestionMessage ingestionMessage)
     {
-        var properties = _rabbitMqChannel.CreateBasicProperties();
-        properties.Persistent = true;
-        properties.ContentType = "application/json";
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(ingestionMessage);
-        _transientErrorsPipeline.Execute(() =>
+        try
         {
-            _rabbitMqChannel.BasicPublish(exchange: ingestionMessage.TopicName,
-                routingKey: "all",
-                basicProperties: properties,
-                body: bytes);
+            var rabbitMqChannel = _rabbitMqConnectionManager.Channel;
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(ingestionMessage);
+            _transientErrorsPipeline.Execute(() =>
+            {
+                var properties = rabbitMqChannel.CreateBasicProperties();
+                properties.Persistent = true;
+                properties.ContentType = "application/json";
+                rabbitMqChannel.BasicPublish(exchange: ingestionMessage.TopicName,
+                    routingKey: "all",
+                    basicProperties: properties,
+                    body: bytes);
+            });
+        }
+        catch
+        {
+            await OpenCircuit();
+            throw;
+        }
+    }
+
+    private async Task OpenCircuit()
+    {
+        var acquired = await _circuitLock.WaitAsync(TimeSpan.FromSeconds(DefaultLockSeconds));
+        if (acquired)
+        {
+            try
+            {
+                if (_isCircuitOpen == true) return;
+                _logger.LogWarning("Opening circuit breaker ...");
+                await StopMqttClients();
+                _rabbitMqConnectionManager.Close();
+                _isCircuitOpen = true;
+                _logger.LogWarning("Circuit breaker is now open");
+            }
+            finally { _circuitLock.Release(); }
+        }
+
+        var _ = Task.Run(async () =>
+        {
+            var acquired = await _circuitLock.WaitAsync(TimeSpan.FromSeconds(DefaultLockSeconds));
+            if (acquired)
+            {
+                try
+                {
+                    if (_isCircuitOpen == false) return;
+                    var reconnectAfter = _configuration.GetValue<int>("ResilienceSettings:CircuitBreakerReconnectAfter");
+                    await Task.Delay(reconnectAfter);
+                    _logger.LogWarning("Try closing circuit breaker ...");
+                    _connectionErrorsPipeline.Execute(() =>
+                    {
+                        try { _rabbitMqConnectionManager.Connect(); }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning("Restarting RabbitMQ failed, reason: {Message}", ex.Message);
+                            throw;
+                        }
+                    });
+                    await StartMqttClients();
+                    _isCircuitOpen = false;
+                    _logger.LogWarning("Circuit breaker is now closed");
+                }
+                finally
+                {
+                    _circuitLock.Release();
+                }
+            }
         });
     }
 
     public override void Dispose()
     {
         base.Dispose();
-
         foreach (var mqttClient in _mqttClients)
             mqttClient.Dispose();
+        _mqttClients.Clear();
     }
 }
