@@ -104,10 +104,6 @@ IModel SetupRabbitMqChannel(IServiceProvider provider)
         prefetchCount: rabbitMqChannelOptions.GetValue<ushort>("PrefetchCount"),
         global: false);
     rabbitMqChannel.ModelShutdown += (sender, e) => OnModelShutdown(sender, e, logger);
-    // _rabbitMqChannel.BasicQos(
-    //     prefetchSize: 0, // RabbitMQ not implemented
-    //     prefetchCount: rabbitMqChannelOptions.GetValue<ushort>("GlobalPrefetchCount"),
-    //     global: true); // does not support in 'quorum' queue [TBD]
     return rabbitMqChannel;
 }
 

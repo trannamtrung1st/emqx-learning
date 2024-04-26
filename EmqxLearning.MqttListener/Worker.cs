@@ -20,7 +20,6 @@ public class Worker : BackgroundService
     private static long _messageCount = 0;
     private readonly ILogger<Worker> _logger;
     private readonly IConfiguration _configuration;
-    private readonly IConnection _rabbitMqConnection;
     private readonly IModel _rabbitMqChannel;
     private readonly ConcurrentBag<IManagedMqttClient> _mqttClients;
     private MqttClientOptions _options;
@@ -32,16 +31,14 @@ public class Worker : BackgroundService
 
     public Worker(ILogger<Worker> logger,
         IConfiguration configuration,
-        ResiliencePipelineProvider<string> resiliencePipelineProvider)
+        ResiliencePipelineProvider<string> resiliencePipelineProvider,
+        IModel rabbitMqChannel)
     {
         _logger = logger;
         _configuration = configuration;
         _mqttClients = new ConcurrentBag<IManagedMqttClient>();
 
-        var rabbitMqClientOptions = configuration.GetSection("RabbitMqClient");
-        var factory = rabbitMqClientOptions.Get<ConnectionFactory>();
-        _rabbitMqConnection = factory.CreateConnection();
-        _rabbitMqChannel = _rabbitMqConnection.CreateModel();
+        _rabbitMqChannel = rabbitMqChannel;
         _rateLimiter = new ConcurrencyLimiter(new ConcurrencyLimiterOptions
         {
             PermitLimit = _configuration.GetValue<int>("ConcurrencyLimit"),
@@ -193,8 +190,5 @@ public class Worker : BackgroundService
 
         foreach (var mqttClient in _mqttClients)
             mqttClient.Dispose();
-
-        _rabbitMqChannel?.Dispose();
-        _rabbitMqConnection?.Dispose();
     }
 }
