@@ -213,7 +213,16 @@ public class Worker : BackgroundService
         }
         catch
         {
-            await OpenCircuit();
+            await _connectionErrorsPipeline.ExecuteAsync(async (token) =>
+            {
+                await OpenCircuit();
+                var _ = Task.Run(async () =>
+                {
+                    var reconnectAfter = _configuration.GetValue<int>("ResilienceSettings:CircuitBreakerReconnectAfter");
+                    await Task.Delay(reconnectAfter);
+                    await CloseCircuit();
+                });
+            });
             throw;
         }
     }
@@ -234,37 +243,35 @@ public class Worker : BackgroundService
             }
             finally { _circuitLock.Release(); }
         }
+    }
 
-        var _ = Task.Run(async () =>
+    private async Task CloseCircuit()
+    {
+        var acquired = await _circuitLock.WaitAsync(TimeSpan.FromSeconds(DefaultLockSeconds));
+        if (acquired)
         {
-            var acquired = await _circuitLock.WaitAsync(TimeSpan.FromSeconds(DefaultLockSeconds));
-            if (acquired)
+            try
             {
-                try
+                if (_isCircuitOpen == false) return;
+                _logger.LogWarning("Try closing circuit breaker ...");
+                _connectionErrorsPipeline.Execute(() =>
                 {
-                    if (_isCircuitOpen == false) return;
-                    var reconnectAfter = _configuration.GetValue<int>("ResilienceSettings:CircuitBreakerReconnectAfter");
-                    await Task.Delay(reconnectAfter);
-                    _logger.LogWarning("Try closing circuit breaker ...");
-                    _connectionErrorsPipeline.Execute(() =>
+                    try { _rabbitMqConnectionManager.Connect(); }
+                    catch (Exception ex)
                     {
-                        try { _rabbitMqConnectionManager.Connect(); }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning("Restarting RabbitMQ failed, reason: {Message}", ex.Message);
-                            throw;
-                        }
-                    });
-                    await StartMqttClients();
-                    _isCircuitOpen = false;
-                    _logger.LogWarning("Circuit breaker is now closed");
-                }
-                finally
-                {
-                    _circuitLock.Release();
-                }
+                        _logger.LogWarning("Restarting RabbitMQ failed, reason: {Message}", ex.Message);
+                        throw;
+                    }
+                });
+                await StartMqttClients();
+                _isCircuitOpen = false;
+                _logger.LogWarning("Circuit breaker is now closed");
             }
-        });
+            finally
+            {
+                _circuitLock.Release();
+            }
+        }
     }
 
     public override void Dispose()
