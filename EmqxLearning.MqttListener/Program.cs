@@ -1,4 +1,5 @@
 using EmqxLearning.MqttListener;
+using EmqxLearning.Shared.Exceptions;
 using EmqxLearning.Shared.Extensions;
 using EmqxLearning.Shared.Services.Abstracts;
 using Polly.Registry;
@@ -39,7 +40,8 @@ IServiceCollection SetupResilience(IServiceCollection services, IConfiguration r
         {
             builder.AddDefaultRetry(
                 retryAttempts: resilienceSettings.GetValue<int>($"{TransientErrorsKey}:RetryAttempts"),
-                delaySecs: resilienceSettings.GetValue<int>($"{TransientErrorsKey}:DelaySecs")
+                delaySecs: resilienceSettings.GetValue<int>($"{TransientErrorsKey}:DelaySecs"),
+                shouldHandle: (ex) => new ValueTask<bool>(ex.Outcome.Exception != null && ex.Outcome.Exception is not CircuitOpenException)
             );
         });
         return registry;

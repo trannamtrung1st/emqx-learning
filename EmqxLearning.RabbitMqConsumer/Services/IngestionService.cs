@@ -2,6 +2,7 @@ using System.Text.Json;
 using Dapper;
 using EmqxLearning.RabbitMqConsumer.Services.Abstracts;
 using EmqxLearning.Shared.Models;
+using EmqxLearning.Shared.Services.Abstracts;
 using Npgsql;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -10,16 +11,16 @@ namespace EmqxLearning.RabbitMqConsumer.Services;
 
 public class IngestionService : IIngestionService
 {
-    private readonly IModel _rabbitMqChannel;
+    private readonly IRabbitMqConnectionManager _rabbitMqConnectionManager;
     private readonly NpgsqlDataSource _dataSource;
     private readonly IConfiguration _configuration;
     private readonly ILogger<IngestionService> _logger;
     public IngestionService(
-        IModel rabbitMqChannel,
+        IRabbitMqConnectionManager rabbitMqConnectionManager,
         ILogger<IngestionService> logger,
         IConfiguration configuration)
     {
-        _rabbitMqChannel = rabbitMqChannel;
+        _rabbitMqConnectionManager = rabbitMqConnectionManager;
         _logger = logger;
         _configuration = configuration;
         _dataSource = NpgsqlDataSource.Create(_configuration.GetConnectionString("DeviceDb"));
@@ -31,7 +32,7 @@ public class IngestionService : IIngestionService
         _logger.LogInformation("Metrics count {Count}", ingestionMessage.RawData.Count);
         var values = ConvertToSeriesRecords(ingestionMessage);
         await InsertToDb(values);
-        _rabbitMqChannel.BasicAck(e.DeliveryTag, multiple: false);
+        _rabbitMqConnectionManager.Channel.BasicAck(e.DeliveryTag, multiple: false);
     }
 
     private static IEnumerable<object> ConvertToSeriesRecords(ReadIngestionMessage message)
@@ -68,5 +69,10 @@ public class IngestionService : IIngestionService
         {
             await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
         }
+    }
+
+    public void Configure(Func<Task> reconnectConsumer)
+    {
+        // [NOTE] not implemented
     }
 }

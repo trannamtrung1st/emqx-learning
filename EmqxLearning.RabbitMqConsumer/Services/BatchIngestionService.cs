@@ -2,39 +2,54 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using EmqxLearning.RabbitMqConsumer.Extensions;
 using EmqxLearning.RabbitMqConsumer.Services.Abstracts;
+using EmqxLearning.Shared.Exceptions;
 using EmqxLearning.Shared.Models;
+using EmqxLearning.Shared.Services.Abstracts;
 using Npgsql;
 using Polly;
 using Polly.Registry;
-using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
 namespace EmqxLearning.RabbitMqConsumer.Services;
 
-public class BatchIngestionService : IIngestionService
+public class BatchIngestionService : IIngestionService, IDisposable
 {
-    private readonly IModel _rabbitMqChannel;
-    private readonly NpgsqlDataSource _dataSource;
+    private const int DefaultLockSeconds = 3;
+    private readonly IRabbitMqConnectionManager _rabbitMqConnectionManager;
+    private NpgsqlDataSource _dataSource;
     private readonly IConfiguration _configuration;
-    private readonly ILogger<IngestionService> _logger;
+    private readonly ILogger<BatchIngestionService> _logger;
     private readonly ConcurrentQueue<(ReadIngestionMessage Payload, BasicDeliverEventArgs EventArgs)> _messages;
+    private readonly ResiliencePipeline _connectionErrorsPipeline;
     private readonly ResiliencePipeline _transientErrorsPipeline;
+    private readonly List<System.Timers.Timer> _timers;
     private CancellationToken _stoppingToken;
+    private Func<Task> _reconnectConsumer;
+
+    private static readonly SemaphoreSlim _circuitLock = new SemaphoreSlim(initialCount: 1);
+    private bool _isCircuitOpen;
 
     public BatchIngestionService(
-        IModel rabbitMqChannel,
-        ILogger<IngestionService> logger,
+        IRabbitMqConnectionManager rabbitMqConnectionManager,
+        ILogger<BatchIngestionService> logger,
         IConfiguration configuration,
         ResiliencePipelineProvider<string> resiliencePipelineProvider)
     {
-        _rabbitMqChannel = rabbitMqChannel;
+        _rabbitMqConnectionManager = rabbitMqConnectionManager;
         _logger = logger;
         _configuration = configuration;
+        _timers = new List<System.Timers.Timer>();
         _messages = new ConcurrentQueue<(ReadIngestionMessage message, BasicDeliverEventArgs eventArgs)>();
-        _dataSource = NpgsqlDataSource.Create(_configuration.GetConnectionString("DeviceDb"));
+        _connectionErrorsPipeline = resiliencePipelineProvider.GetPipeline(Constants.ResiliencePipelines.ConnectionErrors);
         _transientErrorsPipeline = resiliencePipelineProvider.GetPipeline(Constants.ResiliencePipelines.TransientErrors);
 
+        SetupDataSource();
         SetupWorkerThreads();
+    }
+
+    public void Configure(Func<Task> reconnectConsumer)
+    {
+        _reconnectConsumer = reconnectConsumer;
     }
 
     public Task HandleMessage(BasicDeliverEventArgs e, CancellationToken cancellationToken)
@@ -61,39 +76,138 @@ public class BatchIngestionService : IIngestionService
                 try
                 {
                     if (_messages.Count == 0) return;
-                    var deliveryTags = new List<ulong>();
                     while (batch.Count < batchSize && _messages.TryDequeue(out var message))
                     {
                         batch.Add(message);
-                        deliveryTags.Add(message.EventArgs.DeliveryTag);
                     }
                     batch.Sort(comparer);
-                    await HandleBatch(batch, deliveryTags);
+                    await HandleBatch(batch);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, ex.Message);
-                    if (batch.Count > 0)
-                        foreach (var message in batch)
-                            _messages.Enqueue(message);
                 }
             };
             aTimer.AutoReset = true;
             aTimer.Enabled = true;
+            _timers.Add(aTimer);
         }
     }
 
-    private async Task HandleBatch(List<(ReadIngestionMessage Payload, BasicDeliverEventArgs EventArgs)> batch, List<ulong> deliveryTags)
+    private async Task HandleBatch(List<(ReadIngestionMessage Payload, BasicDeliverEventArgs EventArgs)> batch)
     {
-        await _transientErrorsPipeline.ExecuteAsync(async (token) =>
+        try
         {
-            await InsertToDb(batch, token);
-            batch.Clear();
-        });
-        foreach (var tag in deliveryTags)
+            await _transientErrorsPipeline.ExecuteAsync(async (token) =>
+                await InsertToDb(batch, token));
+        }
+        catch
         {
-            _transientErrorsPipeline.Execute(() =>
-                _rabbitMqChannel.BasicAck(tag, multiple: false));
+            await _connectionErrorsPipeline.ExecuteAsync(async (token) =>
+            {
+                await OpenCircuit();
+                var _ = Task.Run(async () =>
+                {
+                    var reconnectAfter = _configuration.GetValue<int>("ResilienceSettings:CircuitBreakerReconnectAfter");
+                    await Task.Delay(reconnectAfter);
+                    await CloseCircuit();
+                });
+            });
+            throw;
+        }
+        foreach (var (_, eventArgs) in batch)
+        {
+            await _transientErrorsPipeline.ExecuteAsync(async (token) =>
+            {
+                await _circuitLock.WaitAsync(token);
+                try
+                {
+                    if (!_isCircuitOpen)
+                        _rabbitMqConnectionManager.Channel.BasicAck(eventArgs.DeliveryTag, multiple: false);
+                    else throw new CircuitOpenException("Circuit is open");
+                }
+                finally { _circuitLock.Release(); }
+            }, cancellationToken: _stoppingToken);
+        }
+    }
+
+    private void SetupDataSource() =>
+        _dataSource = NpgsqlDataSource.Create(_configuration.GetConnectionString("DeviceDb"));
+
+    private async Task EnsureDataSourceActive()
+    {
+        await _connectionErrorsPipeline.ExecuteAsync(async (token) =>
+        {
+            try { await using NpgsqlConnection connection = await _dataSource.OpenConnectionAsync(token); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Reconnecting DB failed, reason: {Message}", ex.Message);
+                throw;
+            }
+        }, _stoppingToken);
+    }
+
+    private void StartTimers()
+    {
+        foreach (var timer in _timers)
+            timer.Start();
+    }
+
+    private void StopTimers()
+    {
+        foreach (var timer in _timers)
+            timer.Stop();
+    }
+
+    private async Task OpenCircuit()
+    {
+        var acquired = await _circuitLock.WaitAsync(TimeSpan.FromSeconds(DefaultLockSeconds));
+        if (acquired)
+        {
+            try
+            {
+                if (_isCircuitOpen == true) return;
+                _logger.LogWarning("Opening circuit breaker ...");
+                StopTimers();
+                _rabbitMqConnectionManager.Close();
+                _dataSource.Dispose();
+                _messages.Clear();
+                _isCircuitOpen = true;
+                _logger.LogWarning("Circuit breaker is now open");
+            }
+            finally { _circuitLock.Release(); }
+        }
+    }
+
+    private async Task CloseCircuit()
+    {
+        var acquired = await _circuitLock.WaitAsync(TimeSpan.FromSeconds(DefaultLockSeconds));
+        if (acquired)
+        {
+            try
+            {
+                if (_isCircuitOpen == false) return;
+                _logger.LogWarning("Try closing circuit breaker ...");
+                SetupDataSource();
+                await EnsureDataSourceActive();
+                _connectionErrorsPipeline.Execute(() =>
+                {
+                    try { _rabbitMqConnectionManager.Connect(); }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning("Restarting RabbitMQ failed, reason: {Message}", ex.Message);
+                        throw;
+                    }
+                });
+                if (_reconnectConsumer != null) await _reconnectConsumer();
+                _isCircuitOpen = false;
+                StartTimers();
+                _logger.LogWarning("Circuit breaker is now closed");
+            }
+            finally
+            {
+                _circuitLock.Release();
+            }
         }
     }
 
@@ -123,6 +237,11 @@ public class BatchIngestionService : IIngestionService
         }
 
         await writer.CompleteAsync(cancellationToken);
+    }
+
+    public void Dispose()
+    {
+        _dataSource?.Dispose();
     }
 }
 

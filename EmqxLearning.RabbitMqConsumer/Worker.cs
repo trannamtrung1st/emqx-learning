@@ -1,4 +1,5 @@
 using EmqxLearning.RabbitMqConsumer.Services.Abstracts;
+using EmqxLearning.Shared.Services.Abstracts;
 using Polly;
 using Polly.Registry;
 using RabbitMQ.Client;
@@ -10,19 +11,19 @@ public class Worker : BackgroundService
 {
     private readonly ILogger<Worker> _logger;
     private readonly IConfiguration _configuration;
-    private readonly IModel _rabbitMqChannel;
+    private readonly IRabbitMqConnectionManager _rabbitMqConnectionManager;
     private readonly IIngestionService _ingestionService;
     private CancellationToken _stoppingToken;
     private readonly ResiliencePipeline _connectionErrorsPipeline;
 
     public Worker(ILogger<Worker> logger,
         IConfiguration configuration,
-        IModel rabbitMqChannel,
+        IRabbitMqConnectionManager rabbitMqConnectionManager,
         IIngestionService ingestionService,
         ResiliencePipelineProvider<string> resiliencePipelineProvider)
     {
         _ingestionService = ingestionService;
-        _rabbitMqChannel = rabbitMqChannel;
+        _rabbitMqConnectionManager = rabbitMqConnectionManager;
         _logger = logger;
         _configuration = configuration;
 
@@ -33,17 +34,25 @@ public class Worker : BackgroundService
     {
         _stoppingToken = stoppingToken;
 
-        var consumerCount = _configuration.GetValue<int>("ConsumerCount");
-        for (int i = 0; i < consumerCount; i++)
-        {
-            var consumer = new AsyncEventingBasicConsumer(_rabbitMqChannel);
-            consumer.Received += OnMessageReceived;
-            _connectionErrorsPipeline.Execute(() =>
-                _rabbitMqChannel.BasicConsume(queue: "ingestion", autoAck: false, consumer: consumer));
-        }
+        _ingestionService.Configure(reconnectConsumer: SetupConsumers);
+        await SetupConsumers();
 
         while (!stoppingToken.IsCancellationRequested)
             await Task.Delay(1000, _stoppingToken);
+    }
+
+    private Task SetupConsumers()
+    {
+        var channel = _rabbitMqConnectionManager.Channel;
+        var consumerCount = _configuration.GetValue<int>("ConsumerCount");
+        for (int i = 0; i < consumerCount; i++)
+        {
+            var consumer = new AsyncEventingBasicConsumer(channel);
+            consumer.Received += OnMessageReceived;
+            _connectionErrorsPipeline.Execute(() =>
+                channel.BasicConsume(queue: "ingestion", autoAck: false, consumer: consumer));
+        }
+        return Task.CompletedTask;
     }
 
     private Task OnMessageReceived(object sender, BasicDeliverEventArgs e)
