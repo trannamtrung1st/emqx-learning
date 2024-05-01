@@ -4,37 +4,60 @@ namespace EmqxLearning.Shared.Services;
 
 public class DynamicRateLimiter : IDynamicRateLimiter
 {
+    private readonly ManualResetEventSlim _resetEvent;
     private readonly SemaphoreSlim _semaphore;
-    private int _queueCount = 0;
-    public int QueueCount => _queueCount;
+
     private int _limit = 0;
-    public int Limit => _limit;
+    private int _queueCount = 0;
     private int _acquired = 0;
-    public int Acquired => _acquired;
-    public int Available => _limit - _acquired;
+
+    public (int Limit, int Acquired, int Available, int QueueCount) State
+    {
+        get
+        {
+            try
+            {
+                _semaphore.Wait();
+                return (_limit, _acquired, _limit - _acquired, _queueCount);
+            }
+            finally { _semaphore.Release(); }
+        }
+    }
 
     public DynamicRateLimiter()
     {
         _semaphore = new SemaphoreSlim(1);
+        _resetEvent = new ManualResetEventSlim();
     }
 
     public async Task Acquire(CancellationToken cancellationToken = default)
     {
-        Interlocked.Increment(ref _queueCount);
-        while (true)
+        bool queued = false;
+        bool canAcquired = false;
+        while (!canAcquired)
         {
             await _semaphore.WaitAsync(cancellationToken: cancellationToken);
+            if (!queued)
+            {
+                Interlocked.Increment(ref _queueCount);
+                queued = true;
+            }
             try
             {
                 if (_acquired < _limit)
                 {
+                    canAcquired = true;
                     _acquired++;
                     Interlocked.Decrement(ref _queueCount);
-                    return;
                 }
+                else _resetEvent.Reset();
             }
-            finally { _semaphore.Release(); }
-            await Task.Delay(50);
+            finally
+            {
+                _semaphore.Release();
+                if (!canAcquired)
+                    _resetEvent.Wait(cancellationToken);
+            }
         }
     }
 
@@ -44,7 +67,10 @@ public class DynamicRateLimiter : IDynamicRateLimiter
         try
         {
             if (_acquired > 0)
+            {
                 _acquired--;
+                _resetEvent.Set();
+            }
         }
         finally { _semaphore.Release(); }
     }

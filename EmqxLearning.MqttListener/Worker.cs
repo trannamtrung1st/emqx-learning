@@ -77,8 +77,9 @@ public class Worker : BackgroundService
         {
             if (_queueCounts.Count == 3) _queueCounts.TryDequeue(out var _);
             if (_availableCounts.Count == 3) _availableCounts.TryDequeue(out var _);
-            _queueCounts.Enqueue(_dynamicRateLimiter.QueueCount);
-            _availableCounts.Enqueue(_dynamicRateLimiter.Available);
+            var (concurrencyLimit, _, concurrencyAvailable, concurrencyQueueCount) = _dynamicRateLimiter.State;
+            _queueCounts.Enqueue(concurrencyQueueCount);
+            _availableCounts.Enqueue(concurrencyAvailable);
             if (_queueCounts.Count < 3 || _availableCounts.Count < 3) return;
             var threadScale = _fuzzyThreadController.GetThreadScale(cpu, mem, factor: factor);
             if (threadScale == 0) return;
@@ -87,20 +88,21 @@ public class Worker : BackgroundService
             int newLimit;
             if (threadScale < 0)
             {
-                newLimit = _dynamicRateLimiter.Limit + threadScale;
+                newLimit = concurrencyLimit + threadScale;
                 if (newLimit < 1) newLimit = 1;
             }
             else
             {
                 newLimit = 0;
                 if (queueCountAvg <= AcceptedQueueCount && availableCountAvg > AcceptedAvailableConcurrency)
-                    newLimit = _dynamicRateLimiter.Limit - threadScale / 2;
+                    newLimit = concurrencyLimit - threadScale / 2;
                 else
-                    newLimit = _dynamicRateLimiter.Limit + threadScale;
+                    newLimit = concurrencyLimit + threadScale;
             }
             if (newLimit == 0) return;
             await _dynamicRateLimiter.SetLimit(newLimit, cancellationToken: _stoppingToken);
             _queueCounts.Clear();
+            _availableCounts.Clear();
             _logger.LogWarning(
                 "CPU: {Cpu} - Memory: {Memory}\n" +
                 "Scale: {Scale} - Available count: {Available} - Queue count: {QueueCount}\n" +
