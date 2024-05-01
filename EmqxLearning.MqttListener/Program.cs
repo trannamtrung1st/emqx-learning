@@ -10,6 +10,10 @@ IHost host = Host.CreateDefaultBuilder(args)
     .ConfigureServices((context, services) =>
     {
         services.AddHostedService<Worker>();
+        services.AddResourceMonitor()
+            .AddFuzzyThreadController()
+            .AddDynamicRateLimiter();
+
         SetupRabbitMq(services, context.Configuration);
 
         var configuration = context.Configuration;

@@ -18,15 +18,17 @@ services:
       MqttClientOptions__Topic: $$share/ahi/projectId/+/devices/+/telemetry
       MqttClientOptions__Qos: 1
       ReceiveDelay: 0
-      ProcessingTime: 0
-      ConcurrencyLimit: 400
-      ProcessingThreads: 20
+      ProcessingTime: 100
+      InitialConcurrencyLimit: 1
+      NumberOfConnections: 20
       BackgroundProcessing: true
+      ScaleFactor: 50
+      ScaleCheckInterval: 5000
       RabbitMqClient__HostName: rabbitmq1
     networks:
       - emqx-bridge
     deploy:
-      replicas: 3
+      replicas: 1
       resources:
         limits:
           cpus: "1"

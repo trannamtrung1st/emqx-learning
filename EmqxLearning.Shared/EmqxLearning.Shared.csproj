@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="FLS" Version="1.1.6" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
     <PackageReference Include="Polly.Core" Version="8.3.1" />
     <PackageReference Include="System.Threading.RateLimiting" Version="8.0.0" />

@@ -18,7 +18,7 @@ services:
       MqttClientOptions__Qos: 1
       ReceiveDelay: 3
       ProcessingTime: 50
-      ProcessingThreads: 20
+      NumberOfConnections: 20
       BackgroundProcessing: true
       RabbitMqClient__HostName: localhost
     network_mode: host

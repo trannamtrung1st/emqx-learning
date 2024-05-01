@@ -22,4 +22,19 @@ public static class ServiceCollectionExtensions
             return rabbitMqConnectionManager;
         });
     }
+
+    public static IServiceCollection AddFuzzyThreadController(this IServiceCollection services)
+    {
+        return services.AddSingleton<IFuzzyThreadController, FuzzyThreadController>();
+    }
+
+    public static IServiceCollection AddResourceMonitor(this IServiceCollection services)
+    {
+        return services.AddSingleton<IResourceMonitor, ResourceMonitor>();
+    }
+
+    public static IServiceCollection AddDynamicRateLimiter(this IServiceCollection services)
+    {
+        return services.AddSingleton<IDynamicRateLimiter, DynamicRateLimiter>();
+    }
 }
