@@ -7,7 +7,7 @@
 ```
 Large payload ~100KB (remove `-m` option)
 ```sh
-./EmqxLearning.MqttPublisher -n=5000 -I=980 -q=1
+./EmqxLearning.MqttPublisher -n=3000 -I=980 -q=1
 ```
 + To start benchmark test using `emqtt-bench`, access the interactive shell of `emqtt-bench` container, then execute below command:
 ```sh

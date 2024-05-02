@@ -2,7 +2,9 @@ namespace EmqxLearning.Shared.Services.Abstracts;
 
 public interface IResourceMonitor
 {
+    void Start();
+    void Stop();
     double GetCpuUsage();
     double GetMemoryUsage();
-    void Monitor(Func<double, double, Task> monitorCallback, double interval = 10000);
+    void SetMonitor(Func<double, double, Task> monitorCallback, double interval = 10000);
 }

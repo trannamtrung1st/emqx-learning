@@ -195,7 +195,7 @@ public class BatchIngestionService : IIngestionService, IDisposable
                     try { _rabbitMqConnectionManager.Connect(); }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning("Restarting RabbitMQ failed, reason: {Message}", ex.Message);
+                        _logger.LogWarning("Reconnecting RabbitMQ failed, reason: {Message}", ex.Message);
                         throw;
                     }
                 });

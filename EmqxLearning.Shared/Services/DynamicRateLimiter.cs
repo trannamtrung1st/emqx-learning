@@ -42,6 +42,7 @@ public class DynamicRateLimiter : IDynamicRateLimiter
                 Interlocked.Increment(ref _queueCount);
                 queued = true;
             }
+
             try
             {
                 if (_acquired < _limit)
@@ -52,12 +53,10 @@ public class DynamicRateLimiter : IDynamicRateLimiter
                 }
                 else _availableEvent.Reset();
             }
-            finally
-            {
-                _semaphore.Release();
-                if (!canAcquired)
-                    _availableEvent.Wait(cancellationToken);
-            }
+            finally { _semaphore.Release(); }
+
+            if (!canAcquired)
+                _availableEvent.Wait(cancellationToken);
         }
     }
 

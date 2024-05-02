@@ -23,7 +23,7 @@ services:
       NumberOfConnections: 20
       BackgroundProcessing: true
       ScaleFactor: 50
-      ScaleCheckInterval: 2500
+      ScaleCheckInterval: 5000
       RabbitMqClient__HostName: rabbitmq1
     networks:
       - emqx-bridge
@@ -32,7 +32,7 @@ services:
       resources:
         limits:
           cpus: "1"
-          memory: "250M"
+          memory: "500M"
     depends_on:
       emqx1:
         condition: service_healthy

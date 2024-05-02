@@ -32,6 +32,7 @@ public class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // [TODO] add circuit token
         _stoppingToken = stoppingToken;
 
         _ingestionService.Configure(reconnectConsumer: SetupConsumers);

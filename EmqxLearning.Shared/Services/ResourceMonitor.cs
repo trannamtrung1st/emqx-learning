@@ -29,7 +29,7 @@ public class ResourceMonitor : IResourceMonitor
         return used / total;
     }
 
-    public void Monitor(Func<double, double, Task> monitorCallback, double interval = 10000)
+    public void SetMonitor(Func<double, double, Task> monitorCallback, double interval = 10000)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) return;
         _currentTimer?.Stop();
@@ -41,8 +41,11 @@ public class ResourceMonitor : IResourceMonitor
             await monitorCallback(cpuUsage, memUsage);
         };
         _currentTimer.AutoReset = true;
-        _currentTimer.Start();
     }
+
+    public void Start() => _currentTimer?.Start();
+
+    public void Stop() => _currentTimer?.Stop();
 
     private string ExecuteCommand(string command)
     {
