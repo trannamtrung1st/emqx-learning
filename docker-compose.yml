@@ -18,8 +18,8 @@ services:
       MqttClientOptions__Topic: $$share/ahi/projectId/+/devices/+/telemetry
       MqttClientOptions__Qos: 1
       ReceiveDelay: 0
-      ProcessingTime: 0
-      InitialConcurrencyLimit: 1
+      ProcessingTime: 20
+      InitialConcurrencyLimit: 8
       NumberOfConnections: 20
       BackgroundProcessing: true
       ScaleFactor: 50
@@ -28,7 +28,7 @@ services:
     networks:
       - emqx-bridge
     deploy:
-      replicas: 1
+      replicas: 3
       resources:
         limits:
           cpus: "1"
@@ -70,9 +70,9 @@ services:
       dockerfile: EmqxLearning.RabbitMqConsumer/Dockerfile
     environment:
       Logging__LogLevel__Default: Warning
-      ProcessingTime: 0
+      ProcessingTime: 50
       ConsumerCount: 2
-      InsertDb: true
+      InsertDb: false
       BatchSettings__Enabled: true
       BatchSettings__BatchInterval: 190
       BatchSettings__BatchSize: 200

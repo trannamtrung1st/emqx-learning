@@ -4,7 +4,7 @@ namespace EmqxLearning.Shared.Services;
 
 public class DynamicRateLimiter : IDynamicRateLimiter
 {
-    private readonly ManualResetEventSlim _resetEvent;
+    private readonly ManualResetEventSlim _availableEvent;
     private readonly SemaphoreSlim _semaphore;
 
     private int _limit = 0;
@@ -27,7 +27,7 @@ public class DynamicRateLimiter : IDynamicRateLimiter
     public DynamicRateLimiter()
     {
         _semaphore = new SemaphoreSlim(1);
-        _resetEvent = new ManualResetEventSlim();
+        _availableEvent = new ManualResetEventSlim();
     }
 
     public async Task Acquire(CancellationToken cancellationToken = default)
@@ -50,13 +50,13 @@ public class DynamicRateLimiter : IDynamicRateLimiter
                     _acquired++;
                     Interlocked.Decrement(ref _queueCount);
                 }
-                else _resetEvent.Reset();
+                else _availableEvent.Reset();
             }
             finally
             {
                 _semaphore.Release();
                 if (!canAcquired)
-                    _resetEvent.Wait(cancellationToken);
+                    _availableEvent.Wait(cancellationToken);
             }
         }
     }
@@ -69,7 +69,7 @@ public class DynamicRateLimiter : IDynamicRateLimiter
             if (_acquired > 0)
             {
                 _acquired--;
-                _resetEvent.Set();
+                _availableEvent.Set();
             }
         }
         finally { _semaphore.Release(); }
@@ -79,7 +79,10 @@ public class DynamicRateLimiter : IDynamicRateLimiter
     {
         await _semaphore.WaitAsync(cancellationToken: cancellationToken);
         try
-        { _limit = limit; }
+        {
+            _limit = limit;
+            if (limit > _limit) _availableEvent.Set();
+        }
         finally { _semaphore.Release(); }
     }
 }

@@ -215,6 +215,11 @@ public class BatchIngestionService : IIngestionService, IDisposable
     const string SeriesColumns = "_ts, device_id, metric_key, value, retention_days";
     private async Task InsertToDb(IEnumerable<(ReadIngestionMessage Payload, BasicDeliverEventArgs EventArgs)> messages, CancellationToken cancellationToken)
     {
+        if (_configuration.GetValue<bool>("InsertDb") == false)
+        {
+            await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
+            return;
+        }
         await using NpgsqlConnection connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         using NpgsqlBinaryImporter writer = connection.BeginBinaryImport($"COPY {SeriesTable} ({SeriesColumns}) FROM STDIN (FORMAT BINARY)");
 
