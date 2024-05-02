@@ -34,29 +34,38 @@ public class DynamicRateLimiter : IDynamicRateLimiter
     {
         bool queued = false;
         bool canAcquired = false;
-        while (!canAcquired)
+        try
         {
-            await _semaphore.WaitAsync(cancellationToken: cancellationToken);
-            if (!queued)
+            while (!canAcquired)
             {
-                Interlocked.Increment(ref _queueCount);
-                queued = true;
-            }
-
-            try
-            {
-                if (_acquired < _limit)
+                await _semaphore.WaitAsync(cancellationToken: cancellationToken);
+                if (!queued)
                 {
-                    canAcquired = true;
-                    _acquired++;
-                    Interlocked.Decrement(ref _queueCount);
+                    Interlocked.Increment(ref _queueCount);
+                    queued = true;
                 }
-                else _availableEvent.Reset();
-            }
-            finally { _semaphore.Release(); }
 
-            if (!canAcquired)
-                _availableEvent.Wait(cancellationToken);
+                try
+                {
+                    if (_acquired < _limit)
+                    {
+                        canAcquired = true;
+                        _acquired++;
+                        Interlocked.Decrement(ref _queueCount);
+                        queued = false;
+                    }
+                    else _availableEvent.Reset();
+                }
+                finally { _semaphore.Release(); }
+
+                if (!canAcquired)
+                    _availableEvent.Wait(cancellationToken);
+            }
+        }
+        catch
+        {
+            if (queued) Interlocked.Decrement(ref _queueCount);
+            throw;
         }
     }
 
