@@ -265,8 +265,7 @@ public class Worker : BackgroundService
     private async Task HandleMessage(MqttApplicationMessageReceivedEventArgs e)
     {
         await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
-        var payloadStr = Encoding.UTF8.GetString(e.ApplicationMessage.PayloadSegment);
-        var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(payloadStr);
+        var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(e.ApplicationMessage.PayloadSegment);
         var ingestionMessage = new IngestionMessage(payload);
         await SendIngestionMessage(ingestionMessage);
 
