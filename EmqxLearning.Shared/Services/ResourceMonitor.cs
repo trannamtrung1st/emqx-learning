@@ -7,25 +7,39 @@ namespace EmqxLearning.Shared.Services;
 public class ResourceMonitor : IResourceMonitor
 {
     private System.Timers.Timer _currentTimer;
+    private DateTime _lastCpuTime;
+    private long _lastCpuUsage;
+
+    public ResourceMonitor()
+    {
+        _lastCpuTime = DateTime.UtcNow;
+        _lastCpuUsage = GetCpuUsageMs();
+    }
 
     public double GetCpuUsage()
     {
-        var output = ExecuteCommand("mpstat");
-        var outputParts = output.Split(Environment.NewLine);
-        var usageInfo = outputParts[outputParts.Length - 2];
-        var usageParts = usageInfo.Split(" ", StringSplitOptions.RemoveEmptyEntries);
-        var idleCpu = usageParts[usageParts.Length - 1];
-        var cpuUsage = 1 - (double.Parse(idleCpu) / 100);
-        return cpuUsage;
+        var currentTime = DateTime.UtcNow;
+        var currentUsageMs = GetCpuUsageMs();
+        var totalTimeMs = (currentTime - _lastCpuTime).TotalMilliseconds;
+        var cpuUtil = (currentUsageMs - _lastCpuUsage) / totalTimeMs;
+        _lastCpuTime = currentTime;
+        _lastCpuUsage = currentUsageMs;
+        return cpuUtil;
+    }
+
+    private long GetCpuUsageMs()
+    {
+        var cpuStat = ExecuteCommand("cat /sys/fs/cgroup/cpu.stat");
+        var usage = cpuStat.Split(Environment.NewLine)[0].Split(" ")[1];
+        return long.Parse(usage) / 1000;
     }
 
     public double GetMemoryUsage()
     {
-        var output = ExecuteCommand("free -m");
-        var lines = output.Split(Environment.NewLine);
-        var memory = lines[1].Split(" ", StringSplitOptions.RemoveEmptyEntries);
-        var total = double.Parse(memory[1]);
-        var used = double.Parse(memory[2]);
+        var maxMem = ExecuteCommand("cat /sys/fs/cgroup/memory.max");
+        var currentMem = ExecuteCommand("cat /sys/fs/cgroup/memory.current");
+        var total = double.Parse(maxMem);
+        var used = double.Parse(currentMem);
         return used / total;
     }
 

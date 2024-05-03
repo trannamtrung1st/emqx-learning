@@ -25,10 +25,12 @@ services:
       ScaleFactor: 50
       ScaleCheckInterval: 5000
       RabbitMqClient__HostName: rabbitmq1
+      RabbitMqClient__MaxMessageSize: 524288
+      RabbitMqClient__RequestedFrameMax: 524288
     networks:
       - emqx-bridge
     deploy:
-      replicas: 3
+      replicas: 1
       resources:
         limits:
           cpus: "1"

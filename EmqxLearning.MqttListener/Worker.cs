@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text;
 using System.Text.Json;
 using EmqxLearning.Shared.Models;
 using MQTTnet;
@@ -30,7 +29,7 @@ public class Worker : BackgroundService
     private readonly ILogger<Worker> _logger;
     private readonly IConfiguration _configuration;
     private readonly IRabbitMqConnectionManager _rabbitMqConnectionManager;
-    private readonly ConcurrentBag<IManagedMqttClient> _mqttClients;
+    private readonly ConcurrentBag<MqttClientWrapper> _mqttClients;
     private readonly ResiliencePipeline _connectionErrorsPipeline;
     private readonly ResiliencePipeline _transientErrorsPipeline;
     private bool _resourceMonitorSet = false;
@@ -60,7 +59,7 @@ public class Worker : BackgroundService
         _dynamicRateLimiter.SetLimit(_configuration.GetValue<int>("InitialConcurrencyLimit")).Wait();
         _rabbitMqConnectionManager = rabbitMqConnectionManager;
         _circuitTokenSource = new CancellationTokenSource();
-        _mqttClients = new ConcurrentBag<IManagedMqttClient>();
+        _mqttClients = new ConcurrentBag<MqttClientWrapper>();
         _connectionErrorsPipeline = resiliencePipelineProvider.GetPipeline(Constants.ResiliencePipelines.ConnectionErrors);
         _transientErrorsPipeline = resiliencePipelineProvider.GetPipeline(Constants.ResiliencePipelines.TransientErrors);
     }
@@ -86,38 +85,43 @@ public class Worker : BackgroundService
         if (!_resourceMonitorSet)
         {
             _resourceMonitorSet = true;
-            var factor = _configuration.GetValue<int>("ScaleFactor");
+            var scaleFactor = _configuration.GetValue<int>("ScaleFactor");
             var initialConcurrencyLimit = _configuration.GetValue<int>("InitialConcurrencyLimit");
             _resourceMonitor.SetMonitor(async (cpu, mem) =>
             {
-                var threadScale = _fuzzyThreadController.GetThreadScale(cpu, mem, factor: factor);
-                if (threadScale == 0) return;
-                var (queueCountAvg, availableCountAvg) = await GetConcurrencyStatistics();
-                var (concurrencyLimit, _, _, _) = _dynamicRateLimiter.State;
-                int newLimit;
-                if (threadScale < 0)
+                try
                 {
-                    newLimit = concurrencyLimit + threadScale;
-                    if (newLimit < initialConcurrencyLimit) newLimit = initialConcurrencyLimit;
+                    await ScaleConcurrency(cpu, mem, scaleFactor, initialConcurrencyLimit);
                 }
-                else
+                catch (Exception ex)
                 {
-                    newLimit = 0;
-                    if (queueCountAvg <= AcceptedQueueCount && availableCountAvg > AcceptedAvailableConcurrency)
-                        newLimit = concurrencyLimit - threadScale / 2;
-                    else
-                        newLimit = concurrencyLimit + threadScale;
+                    _logger.LogError(ex, ex.Message);
                 }
-                if (newLimit == 0) return;
-                await _dynamicRateLimiter.SetLimit(newLimit, cancellationToken: _circuitTokenSource.Token);
-                _logger.LogWarning(
-                    "CPU: {Cpu} - Memory: {Memory}\n" +
-                    "Scale: {Scale} - Available count: {Available} - Queue count: {QueueCount}\n" +
-                    "New thread limit: {Limit}",
-                    cpu, mem, threadScale, availableCountAvg, queueCountAvg, newLimit);
             }, interval: _configuration.GetValue<int>("ScaleCheckInterval"));
         }
         _resourceMonitor.Start();
+    }
+
+    private async Task ScaleConcurrency(double cpu, double mem, int scaleFactor, int initialConcurrencyLimit)
+    {
+        var threadScale = _fuzzyThreadController.GetThreadScale(cpu, mem, factor: scaleFactor);
+        if (threadScale == 0) return;
+        var (queueCountAvg, availableCountAvg) = await GetConcurrencyStatistics();
+        var (concurrencyLimit, _, _, _) = _dynamicRateLimiter.State;
+        int newLimit;
+        if (threadScale < 0)
+            newLimit = concurrencyLimit + threadScale;
+        else if (queueCountAvg <= AcceptedQueueCount && availableCountAvg > AcceptedAvailableConcurrency)
+            newLimit = concurrencyLimit - threadScale / 2;
+        else
+            newLimit = concurrencyLimit + threadScale;
+        if (newLimit < initialConcurrencyLimit) newLimit = initialConcurrencyLimit;
+        await _dynamicRateLimiter.SetLimit(newLimit, cancellationToken: _circuitTokenSource.Token);
+        _logger.LogWarning(
+            "CPU: {Cpu} - Memory: {Memory}\n" +
+            "Scale: {Scale} - Available count: {Available} - Queue count: {QueueCount}\n" +
+            "New thread limit: {Limit}",
+            cpu, mem, threadScale, availableCountAvg, queueCountAvg, newLimit);
     }
 
     private void StartConcurrencyCollector()
@@ -159,8 +163,9 @@ public class Worker : BackgroundService
 
     private async Task StartMqttClients()
     {
-        foreach (var mqttClient in _mqttClients)
+        foreach (var wrapper in _mqttClients)
         {
+            var mqttClient = wrapper.Client;
             await _connectionErrorsPipeline.ExecuteAsync(async (token) =>
             {
                 try { await mqttClient.StartAsync(mqttClient.Options); }
@@ -176,8 +181,8 @@ public class Worker : BackgroundService
 
     private async Task StopMqttClients()
     {
-        foreach (var mqttClient in _mqttClients)
-            await mqttClient.StopAsync();
+        foreach (var wrapper in _mqttClients)
+            await wrapper.Client.StopAsync();
     }
 
     private async Task InitializeMqttClient(int threadIdx)
@@ -185,7 +190,8 @@ public class Worker : BackgroundService
         var backgroundProcessing = _configuration.GetValue<bool>("BackgroundProcessing");
         var factory = new MqttFactory();
         var mqttClient = factory.CreateManagedMqttClient();
-        _mqttClients.Add(mqttClient);
+        var wrapper = new MqttClientWrapper(mqttClient, parentCancellationToken: _circuitTokenSource.Token);
+        _mqttClients.Add(wrapper);
         var mqttClientConfiguration = _configuration.GetSection("MqttClientOptions");
         var optionsBuilder = new MqttClientOptionsBuilder()
             .WithTcpServer(mqttClientConfiguration["TcpServer"])
@@ -209,8 +215,10 @@ public class Worker : BackgroundService
             .Build();
 
         mqttClient.ConnectedAsync += (e) => OnConnected(e, mqttClient);
-        mqttClient.DisconnectedAsync += OnDisconnected;
-        mqttClient.ApplicationMessageReceivedAsync += backgroundProcessing ? OnMessageReceivedBackground : OnMessageReceivedNormal;
+        mqttClient.DisconnectedAsync += (e) => OnDisconnected(e, wrapper.TokenSource);
+        mqttClient.ApplicationMessageReceivedAsync += backgroundProcessing
+            ? ((e) => OnMessageReceivedBackground(e, wrapper.TokenSource.Token))
+            : OnMessageReceivedNormal;
         await _connectionErrorsPipeline.ExecuteAsync(async (token) =>
             await mqttClient.StartAsync(_managedOptions));
     }
@@ -242,15 +250,15 @@ public class Worker : BackgroundService
         _logger.LogInformation("Received message at {Time}", DateTime.Now);
     }
 
-    private async Task OnMessageReceivedBackground(MqttApplicationMessageReceivedEventArgs e)
+    private async Task OnMessageReceivedBackground(MqttApplicationMessageReceivedEventArgs e, CancellationToken cancellationToken)
     {
         try
         {
             e.AutoAcknowledge = false;
-            await _dynamicRateLimiter.Acquire(cancellationToken: _circuitTokenSource.Token);
+            await _dynamicRateLimiter.Acquire(cancellationToken: cancellationToken);
             var _ = Task.Run(async () =>
             {
-                try { await HandleMessage(e); }
+                try { await HandleMessage(e, cancellationToken); }
                 catch (Exception ex) { _logger.LogError(ex, ex.Message); }
                 finally { await _dynamicRateLimiter.Release(); }
             });
@@ -262,7 +270,7 @@ public class Worker : BackgroundService
         }
     }
 
-    private async Task HandleMessage(MqttApplicationMessageReceivedEventArgs e)
+    private async Task HandleMessage(MqttApplicationMessageReceivedEventArgs e, CancellationToken cancellationToken)
     {
         await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
         var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(e.ApplicationMessage.PayloadSegment);
@@ -275,11 +283,12 @@ public class Worker : BackgroundService
                 if (_isCircuitOpen) throw new CircuitOpenException();
                 await e.AcknowledgeAsync(token);
             },
-            cancellationToken: _circuitTokenSource.Token);
+            cancellationToken: cancellationToken);
     }
 
-    private Task OnDisconnected(MqttClientDisconnectedEventArgs e)
+    private Task OnDisconnected(MqttClientDisconnectedEventArgs e, CancellationTokenSource cancellationTokenSource)
     {
+        cancellationTokenSource.Cancel();
         _logger.LogError(e.Exception, "### DISCONNECTED FROM SERVER ### {Event}",
             e.Exception == null ? JsonSerializer.Serialize(e) : string.Empty);
         return Task.CompletedTask;
@@ -366,6 +375,7 @@ public class Worker : BackgroundService
             {
                 if (_isCircuitOpen == false) return;
                 _logger.LogWarning("Try closing circuit breaker ...");
+                _circuitTokenSource?.Dispose();
                 _circuitTokenSource = new CancellationTokenSource();
                 _connectionErrorsPipeline.Execute(() =>
                 {
@@ -392,8 +402,32 @@ public class Worker : BackgroundService
     public override void Dispose()
     {
         base.Dispose();
-        foreach (var mqttClient in _mqttClients)
-            mqttClient.Dispose();
+        foreach (var wrapper in _mqttClients)
+            wrapper.Client.Dispose();
         _mqttClients.Clear();
+    }
+}
+
+internal class MqttClientWrapper
+{
+    private CancellationTokenSource _tokenSource;
+    private readonly CancellationToken _parentCancellationToken;
+    private readonly IManagedMqttClient _client;
+
+    public MqttClientWrapper(IManagedMqttClient client, CancellationToken parentCancellationToken)
+    {
+        _client = client;
+        _parentCancellationToken = parentCancellationToken;
+        _tokenSource = new CancellationTokenSource();
+        _parentCancellationToken.Register(() => _tokenSource.Cancel());
+    }
+
+    public IManagedMqttClient Client => _client;
+    public CancellationTokenSource TokenSource => _tokenSource;
+
+    public void ResetTokenSource()
+    {
+        _tokenSource?.Dispose();
+        _tokenSource = new CancellationTokenSource();
     }
 }
