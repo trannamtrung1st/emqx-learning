@@ -11,6 +11,7 @@ using Polly.Registry;
 using Polly;
 using EmqxLearning.Shared.Services.Abstracts;
 using EmqxLearning.Shared.Exceptions;
+using MQTTnet.Internal;
 
 namespace EmqxLearning.MqttListener;
 
@@ -67,8 +68,7 @@ public class Worker : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _stoppingToken = stoppingToken;
-        _stoppingToken.Register(() => _circuitTokenSource.Cancel());
-
+        SetupCancellationTokens();
         StartConcurrencyCollector();
         StartDynamicScalingWorker();
 
@@ -78,6 +78,16 @@ public class Worker : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
             await Task.Delay(1000, stoppingToken);
+    }
+
+    private void SetupCancellationTokens()
+    {
+        _stoppingToken.Register(() => _circuitTokenSource.Cancel());
+        _circuitTokenSource.Token.Register(() =>
+        {
+            foreach (var wrapper in _mqttClients)
+                wrapper.TokenSource.TryCancel();
+        });
     }
 
     private void StartDynamicScalingWorker()
@@ -168,12 +178,16 @@ public class Worker : BackgroundService
             var mqttClient = wrapper.Client;
             await _connectionErrorsPipeline.ExecuteAsync(async (token) =>
             {
-                try { await mqttClient.StartAsync(mqttClient.Options); }
+                try
+                {
+                    await mqttClient.StartAsync(mqttClient.Options);
+                }
                 catch (Exception ex)
                 {
                     _logger.LogWarning("Reconnecting MQTT client {ClientId} failed, reason: {Message}",
                         mqttClient.Options.ClientOptions.ClientId,
                         ex.Message);
+                    throw;
                 }
             });
         }
@@ -182,7 +196,11 @@ public class Worker : BackgroundService
     private async Task StopMqttClients()
     {
         foreach (var wrapper in _mqttClients)
+        {
+            wrapper.TokenSource.TryCancel();
+            await wrapper.SafeAccessBatch((batch) => batch.Clear());
             await wrapper.Client.StopAsync();
+        }
     }
 
     private async Task InitializeMqttClient(int threadIdx)
@@ -190,7 +208,7 @@ public class Worker : BackgroundService
         var backgroundProcessing = _configuration.GetValue<bool>("BackgroundProcessing");
         var factory = new MqttFactory();
         var mqttClient = factory.CreateManagedMqttClient();
-        var wrapper = new MqttClientWrapper(mqttClient, parentCancellationToken: _circuitTokenSource.Token);
+        var wrapper = new MqttClientWrapper(mqttClient);
         _mqttClients.Add(wrapper);
         var mqttClientConfiguration = _configuration.GetSection("MqttClientOptions");
         var optionsBuilder = new MqttClientOptionsBuilder()
@@ -215,12 +233,13 @@ public class Worker : BackgroundService
             .Build();
 
         mqttClient.ConnectedAsync += (e) => OnConnected(e, mqttClient);
-        mqttClient.DisconnectedAsync += (e) => OnDisconnected(e, wrapper.TokenSource);
+        mqttClient.DisconnectedAsync += (e) => OnDisconnected(e, wrapper);
         mqttClient.ApplicationMessageReceivedAsync += backgroundProcessing
-            ? ((e) => OnMessageReceivedBackground(e, wrapper.TokenSource.Token))
+            ? ((e) => OnMessageReceivedBackground(e, wrapper))
             : OnMessageReceivedNormal;
         await _connectionErrorsPipeline.ExecuteAsync(async (token) =>
-            await mqttClient.StartAsync(_managedOptions));
+            await mqttClient.StartAsync(_managedOptions),
+            cancellationToken: _stoppingToken);
     }
 
     private async Task OnConnected(MqttClientConnectedEventArgs e, IManagedMqttClient mqttClient)
@@ -250,15 +269,24 @@ public class Worker : BackgroundService
         _logger.LogInformation("Received message at {Time}", DateTime.Now);
     }
 
-    private async Task OnMessageReceivedBackground(MqttApplicationMessageReceivedEventArgs e, CancellationToken cancellationToken)
+    private async Task OnMessageReceivedBackground(MqttApplicationMessageReceivedEventArgs e, MqttClientWrapper wrapper)
     {
         try
         {
             e.AutoAcknowledge = false;
-            await _dynamicRateLimiter.Acquire(cancellationToken: cancellationToken);
+            if (wrapper.TokenSource.Token.IsCancellationRequested)
+            {
+                Console.WriteLine($"Cancelled: {wrapper.TokenSource.Token.IsCancellationRequested}");
+            }
+            await _dynamicRateLimiter.Acquire(cancellationToken: wrapper.TokenSource.Token);
             var _ = Task.Run(async () =>
             {
-                try { await HandleMessage(e, cancellationToken); }
+                try { await HandleMessage(e, wrapper); }
+                catch (DownstreamDisconnectedException ex)
+                {
+                    _logger.LogError(ex, ex.Message);
+                    var _ = Task.Run(HandleOpenCircuit);
+                }
                 catch (Exception ex) { _logger.LogError(ex, ex.Message); }
                 finally { await _dynamicRateLimiter.Release(); }
             });
@@ -270,31 +298,80 @@ public class Worker : BackgroundService
         }
     }
 
-    private async Task HandleMessage(MqttApplicationMessageReceivedEventArgs e, CancellationToken cancellationToken)
+    private async Task HandleOpenCircuit()
+    {
+        await OpenCircuit();
+        var reconnectAfter = _configuration.GetValue<int>("ResilienceSettings:CircuitBreakerReconnectAfter");
+        System.Timers.Timer closeTimer = new System.Timers.Timer(reconnectAfter);
+        closeTimer.Elapsed += async (s, e) => await CloseCircuit();
+        closeTimer.AutoReset = false;
+        closeTimer.Start();
+    }
+
+    private async Task HandleMessage(MqttApplicationMessageReceivedEventArgs e, MqttClientWrapper wrapper)
     {
         await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
         var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(e.ApplicationMessage.PayloadSegment);
         var ingestionMessage = new IngestionMessage(payload);
         await SendIngestionMessage(ingestionMessage);
-
-        await _transientErrorsPipeline.ExecuteAsync(
-            async (token) =>
-            {
-                if (_isCircuitOpen) throw new CircuitOpenException();
-                await e.AcknowledgeAsync(token);
-            },
-            cancellationToken: cancellationToken);
+        await ConfirmBatch(e, wrapper);
     }
 
-    private Task OnDisconnected(MqttClientDisconnectedEventArgs e, CancellationTokenSource cancellationTokenSource)
+    private async Task ConfirmBatch(MqttApplicationMessageReceivedEventArgs e, MqttClientWrapper wrapper)
     {
-        cancellationTokenSource.Cancel();
+        var batchSize = _configuration.GetValue<int>("RabbitMqChannel:PublisherConfirmBatchSize");
+        List<MqttApplicationMessageReceivedEventArgs> confirmBatch = null;
+
+        // [TODO] multi-channels
+        await wrapper.SafeAccessBatch((batch) =>
+        {
+            if (batch.Count >= batchSize)
+            {
+                confirmBatch = new List<MqttApplicationMessageReceivedEventArgs>();
+                while (batch.TryDequeue(out var ev))
+                    confirmBatch.Add(ev);
+            }
+            batch.Enqueue(e);
+        });
+
+        if (confirmBatch != null)
+        {
+            var timeout = _configuration.GetValue<TimeSpan>("RabbitMqChannel:PublisherConfirmTimeout");
+            bool confirmed;
+            try
+            {
+                confirmed = _transientErrorsPipeline.Execute(
+                    (token) => _rabbitMqConnectionManager.Channel.WaitForConfirms(timeout),
+                    cancellationToken: wrapper.TokenSource.Token);
+            }
+            catch (Exception ex)
+            {
+                throw new DownstreamDisconnectedException(ex.Message, innerException: ex);
+            }
+
+            // [TODO] handle when confirmed == false
+            foreach (var message in confirmBatch)
+            {
+                await _transientErrorsPipeline.ExecuteAsync(
+                    async (token) =>
+                    {
+                        if (_isCircuitOpen) throw new CircuitOpenException();
+                        await message.AcknowledgeAsync(token);
+                    },
+                    cancellationToken: wrapper.TokenSource.Token);
+            }
+        }
+    }
+
+    private Task OnDisconnected(MqttClientDisconnectedEventArgs e, MqttClientWrapper wrapper)
+    {
+        wrapper.TokenSource.TryCancel();
         _logger.LogError(e.Exception, "### DISCONNECTED FROM SERVER ### {Event}",
             e.Exception == null ? JsonSerializer.Serialize(e) : string.Empty);
         return Task.CompletedTask;
     }
 
-    private async Task SendIngestionMessage(IngestionMessage ingestionMessage)
+    private Task SendIngestionMessage(IngestionMessage ingestionMessage)
     {
         try
         {
@@ -305,33 +382,17 @@ public class Worker : BackgroundService
                 var properties = rabbitMqChannel.CreateBasicProperties();
                 properties.Persistent = true;
                 properties.ContentType = "application/json";
+                // [TODO] use batch publish
                 rabbitMqChannel.BasicPublish(exchange: ingestionMessage.TopicName,
                     routingKey: "all",
                     basicProperties: properties,
                     body: bytes);
             });
+            return Task.CompletedTask;
         }
-        catch
+        catch (Exception ex)
         {
-            await _connectionErrorsPipeline.ExecuteAsync(async (token) =>
-            {
-                try
-                {
-                    await OpenCircuit();
-                    var _ = Task.Run(async () =>
-                    {
-                        var reconnectAfter = _configuration.GetValue<int>("ResilienceSettings:CircuitBreakerReconnectAfter");
-                        await Task.Delay(reconnectAfter);
-                        await CloseCircuit();
-                    });
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, ex.Message);
-                    throw;
-                }
-            });
-            throw;
+            throw new DownstreamDisconnectedException(ex.Message, innerException: ex);
         }
     }
 
@@ -405,29 +466,39 @@ public class Worker : BackgroundService
         foreach (var wrapper in _mqttClients)
             wrapper.Client.Dispose();
         _mqttClients.Clear();
+        // [TODO] dispose others
     }
 }
 
 internal class MqttClientWrapper
 {
     private CancellationTokenSource _tokenSource;
-    private readonly CancellationToken _parentCancellationToken;
     private readonly IManagedMqttClient _client;
+    private readonly SemaphoreSlim _batchLock;
+    private readonly Queue<MqttApplicationMessageReceivedEventArgs> _batch;
 
-    public MqttClientWrapper(IManagedMqttClient client, CancellationToken parentCancellationToken)
+    public MqttClientWrapper(IManagedMqttClient client)
     {
         _client = client;
-        _parentCancellationToken = parentCancellationToken;
-        _tokenSource = new CancellationTokenSource();
-        _parentCancellationToken.Register(() => _tokenSource.Cancel());
+        _batchLock = new SemaphoreSlim(1);
+        _batch = new Queue<MqttApplicationMessageReceivedEventArgs>();
+        ResetTokenSource();
     }
 
     public IManagedMqttClient Client => _client;
     public CancellationTokenSource TokenSource => _tokenSource;
 
+    public async Task SafeAccessBatch(Action<Queue<MqttApplicationMessageReceivedEventArgs>> action)
+    {
+        await _batchLock.WaitAsync();
+        try { action(_batch); }
+        finally { _batchLock.Release(); }
+    }
+
     public void ResetTokenSource()
     {
         _tokenSource?.Dispose();
         _tokenSource = new CancellationTokenSource();
+        _tokenSource.Token.Register(() => ResetTokenSource());
     }
 }

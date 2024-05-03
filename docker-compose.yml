@@ -27,6 +27,7 @@ services:
       RabbitMqClient__HostName: rabbitmq1
       RabbitMqClient__MaxMessageSize: 524288
       RabbitMqClient__RequestedFrameMax: 524288
+      RabbitMqChannel__PublisherConfirmBatchSize: 30
     networks:
       - emqx-bridge
     deploy:

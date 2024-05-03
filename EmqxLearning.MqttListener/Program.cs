@@ -90,6 +90,7 @@ Action<IModel> SetupRabbitMqChannel(IServiceProvider provider)
     {
         channel.ContinuationTimeout = configuration.GetValue<TimeSpan?>("RabbitMqChannel:ContinuationTimeout") ?? channel.ContinuationTimeout;
         channel.ModelShutdown += (sender, e) => OnModelShutdown(sender, e, logger);
+        channel.ConfirmSelect();
     };
     return configureChannel;
 }
