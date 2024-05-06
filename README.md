@@ -24,9 +24,9 @@ and query like '%INSERT INTO device_metric_series%';
 ```
 + To disconnect container from network
 ```sh
-docker network disconnect emqx-learning_emqx-bridge {container-id}
+docker network disconnect emqx-learning_emqx-bridge 180a71fcf037917ac835e6e6f9e488b6bb59f1be65686fcdd48291774d259591
 ```
 + To connect container to network
 ```sh
-docker network connect --alias {alias} emqx-learning_emqx-bridge {container-id}
+docker network connect --alias rabbitmq1 emqx-learning_emqx-bridge 180a71fcf037917ac835e6e6f9e488b6bb59f1be65686fcdd48291774d259591
 ```
