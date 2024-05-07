@@ -304,7 +304,7 @@ public class Worker : BackgroundService
         await Task.Delay(_configuration.GetValue<int>("ProcessingTime"));
         var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(e.ApplicationMessage.PayloadSegment);
         var ingestionMessage = new IngestionMessage(payload);
-        await SendIngestionMessage(ingestionMessage);
+        SendIngestionMessage(ingestionMessage);
 
         await _transientErrorsPipeline.ExecuteAsync(
             async (token) =>
@@ -323,7 +323,7 @@ public class Worker : BackgroundService
         return Task.CompletedTask;
     }
 
-    private async Task SendIngestionMessage(IngestionMessage ingestionMessage)
+    private void SendIngestionMessage(IngestionMessage ingestionMessage)
     {
         try
         {
@@ -340,27 +340,9 @@ public class Worker : BackgroundService
                     body: bytes);
             });
         }
-        catch
+        catch (Exception ex)
         {
-            await _connectionErrorsPipeline.ExecuteAsync(async (token) =>
-            {
-                try
-                {
-                    await OpenCircuit();
-                    var _ = Task.Run(async () =>
-                    {
-                        var reconnectAfter = _configuration.GetValue<int>("ResilienceSettings:CircuitBreakerReconnectAfter");
-                        await Task.Delay(reconnectAfter);
-                        await CloseCircuit();
-                    });
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, ex.Message);
-                    throw;
-                }
-            });
-            throw;
+            throw new DownstreamDisconnectedException(ex.Message, ex);
         }
     }
 
