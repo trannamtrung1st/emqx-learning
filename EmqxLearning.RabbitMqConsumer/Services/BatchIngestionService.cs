@@ -19,7 +19,7 @@ public class BatchIngestionService : IIngestionService, IDisposable
     private NpgsqlDataSource _dataSource;
     private readonly IConfiguration _configuration;
     private readonly ILogger<BatchIngestionService> _logger;
-    private readonly ConcurrentQueue<(ReadIngestionMessage Payload, BasicDeliverEventArgs EventArgs)> _messages;
+    private readonly ConcurrentQueue<WrappedIngestionMessage> _messages;
     private readonly ResiliencePipeline _connectionErrorsPipeline;
     private readonly ResiliencePipeline _transientErrorsPipeline;
     private readonly List<System.Timers.Timer> _timers;
@@ -39,7 +39,7 @@ public class BatchIngestionService : IIngestionService, IDisposable
         _logger = logger;
         _configuration = configuration;
         _timers = new List<System.Timers.Timer>();
-        _messages = new ConcurrentQueue<(ReadIngestionMessage message, BasicDeliverEventArgs eventArgs)>();
+        _messages = new ConcurrentQueue<WrappedIngestionMessage>();
         _connectionErrorsPipeline = resiliencePipelineProvider.GetPipeline(Constants.ResiliencePipelines.ConnectionErrors);
         _transientErrorsPipeline = resiliencePipelineProvider.GetPipeline(Constants.ResiliencePipelines.TransientErrors);
 
@@ -57,7 +57,7 @@ public class BatchIngestionService : IIngestionService, IDisposable
         _stoppingToken = cancellationToken;
         var ingestionMessage = JsonSerializer.Deserialize<ReadIngestionMessage>(e.Body.ToArray());
         _logger.LogInformation("Metrics count {Count}", ingestionMessage.RawData.Count);
-        _messages.Enqueue((ingestionMessage, e));
+        _messages.Enqueue(new(ingestionMessage, e));
         return Task.CompletedTask;
     }
 
@@ -72,7 +72,7 @@ public class BatchIngestionService : IIngestionService, IDisposable
             var aTimer = new System.Timers.Timer(batchInterval);
             aTimer.Elapsed += async (s, e) =>
             {
-                var batch = new List<(ReadIngestionMessage Payload, BasicDeliverEventArgs EventArgs)>();
+                var batch = new List<WrappedIngestionMessage>();
                 try
                 {
                     if (_messages.Count == 0) return;
@@ -94,7 +94,7 @@ public class BatchIngestionService : IIngestionService, IDisposable
         }
     }
 
-    private async Task HandleBatch(List<(ReadIngestionMessage Payload, BasicDeliverEventArgs EventArgs)> batch)
+    private async Task HandleBatch(List<WrappedIngestionMessage> batch)
     {
         try
         {
@@ -115,15 +115,16 @@ public class BatchIngestionService : IIngestionService, IDisposable
             });
             throw;
         }
-        foreach (var (_, eventArgs) in batch)
+        foreach (var message in batch)
         {
+            var channel = _rabbitMqConnectionManager.Channel;
             await _transientErrorsPipeline.ExecuteAsync(async (token) =>
             {
                 await _circuitLock.WaitAsync(token);
                 try
                 {
                     if (!_isCircuitOpen)
-                        _rabbitMqConnectionManager.Channel.BasicAck(eventArgs.DeliveryTag, multiple: false);
+                        channel.BasicAck(message.EventArgs.DeliveryTag, multiple: false);
                     else throw new CircuitOpenException("Circuit is open");
                 }
                 finally { _circuitLock.Release(); }
@@ -213,7 +214,7 @@ public class BatchIngestionService : IIngestionService, IDisposable
 
     const string SeriesTable = "device_metric_series";
     const string SeriesColumns = "_ts, device_id, metric_key, value, retention_days";
-    private async Task InsertToDb(IEnumerable<(ReadIngestionMessage Payload, BasicDeliverEventArgs EventArgs)> messages, CancellationToken cancellationToken)
+    private async Task InsertToDb(IEnumerable<WrappedIngestionMessage> messages, CancellationToken cancellationToken)
     {
         if (_configuration.GetValue<bool>("InsertDb") == false)
         {
@@ -250,16 +251,25 @@ public class BatchIngestionService : IIngestionService, IDisposable
     }
 }
 
-class IngestionMessageComparer : IComparer<(ReadIngestionMessage Payload, BasicDeliverEventArgs EventArgs)>
+class IngestionMessageComparer : IComparer<WrappedIngestionMessage>
 {
-    public int Compare(
-        (ReadIngestionMessage Payload, BasicDeliverEventArgs EventArgs) x,
-        (ReadIngestionMessage Payload, BasicDeliverEventArgs EventArgs) y)
+    public int Compare(WrappedIngestionMessage x, WrappedIngestionMessage y)
     {
         var xTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(x.Payload.RawData["timestamp"].ToString()));
         var yTimestamp = DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(y.Payload.RawData["timestamp"].ToString()));
         if (xTimestamp > yTimestamp) return 1;
         if (xTimestamp < yTimestamp) return -1;
         return 0;
+    }
+}
+
+struct WrappedIngestionMessage
+{
+    public ReadIngestionMessage Payload { get; }
+    public BasicDeliverEventArgs EventArgs { get; }
+    public WrappedIngestionMessage(ReadIngestionMessage payload, BasicDeliverEventArgs eventArgs)
+    {
+        Payload = payload;
+        EventArgs = eventArgs;
     }
 }
