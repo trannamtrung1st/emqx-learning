@@ -174,6 +174,7 @@ public class Worker : BackgroundService
                     _logger.LogWarning("Reconnecting MQTT client {ClientId} failed, reason: {Message}",
                         mqttClient.Options.ClientOptions.ClientId,
                         ex.Message);
+                    throw;
                 }
             });
         }
