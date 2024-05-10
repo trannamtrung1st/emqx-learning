@@ -32,7 +32,7 @@ services:
       resources:
         limits:
           cpus: "1"
-          memory: "500M"
+          memory: "250M"
     depends_on:
       emqx1:
         condition: service_healthy

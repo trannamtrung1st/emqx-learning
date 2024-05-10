@@ -1,0 +1,58 @@
+﻿using System.Text.Json;
+using MQTTnet;
+using MQTTnet.Client;
+using MQTTnet.Protocol;
+
+using var cts = new CancellationTokenSource();
+Console.CancelKeyPress += (s, e) =>
+{
+    Console.WriteLine("Canceling ...");
+    cts.Cancel();
+    e.Cancel = true;
+};
+var cancellationToken = cts.Token;
+var numOfDevices = 5000;
+var interval = 980;
+var tcpServer = "localhost";
+var topicFormat = "{0}/devices/{1}/telemetry";
+var qos = MqttQualityOfServiceLevel.AtLeastOnce;
+var factory = new MqttFactory();
+Console.WriteLine("Setup ...");
+
+var clients = new List<IMqttClient>();
+
+for (int i = 0; i < numOfDevices; i++)
+{
+    var mqttClient = factory.CreateMqttClient();
+    var options = new MqttClientOptionsBuilder()
+        .WithTcpServer(tcpServer)
+        .WithCredentials("broker-listener", "Fe5XPfrJdD5qAZY5JTPWJP8Jr8GXMEFx")
+        .Build();
+    await mqttClient.ConnectAsync(options, cancellationToken);
+    clients.Add(mqttClient);
+}
+
+Console.WriteLine("Running ...");
+
+Parallel.ForEach(clients, async (mqttClient, _, i) =>
+{
+    while (!cancellationToken.IsCancellationRequested)
+    {
+        var dict = new Dictionary<string, object>();
+        dict["deviceId"] = "device-large-payload";
+        dict["timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        for (int idx = 0; idx < 7; idx++)
+            dict[$"numeric{idx}"] = Random.Shared.NextDouble();
+        var topic = string.Format(topicFormat, "34e5ee62-429c-4724-b3d0-3891bd0a08c9", i);
+        var message = new MqttApplicationMessageBuilder()
+            .WithTopic(topic)
+            .WithPayload(JsonSerializer.Serialize(dict))
+            .WithQualityOfServiceLevel(qos)
+            .Build();
+        await mqttClient.PublishAsync(message, cancellationToken);
+        await Task.Delay(interval, cancellationToken);
+    }
+});
+
+while (!cancellationToken.IsCancellationRequested)
+    await Task.Delay(1000);

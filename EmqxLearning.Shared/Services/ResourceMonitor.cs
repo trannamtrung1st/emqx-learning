@@ -9,20 +9,33 @@ public class ResourceMonitor : IResourceMonitor
     private System.Timers.Timer _currentTimer;
     private DateTime _lastCpuTime;
     private long _lastCpuUsage;
+    private double _totalCores;
 
     public ResourceMonitor()
     {
         _lastCpuTime = DateTime.UtcNow;
-        _lastCpuUsage = IsLinux ? GetCpuUsageMs() : default;
+        if (IsLinux)
+        {
+            _lastCpuUsage = IsLinux ? GetCpuUsageMs() : default;
+            _totalCores = GetTotalCores();
+        }
     }
 
     public bool IsLinux => RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
+
+    public double GetTotalCores()
+    {
+        var cpuMaxOutput = ExecuteCommand("cat /sys/fs/cgroup/cpu.max");
+        var cpuMax = cpuMaxOutput.Split(" ");
+        var totalCores = double.Parse(cpuMax[0]) / double.Parse(cpuMax[1]);
+        return totalCores;
+    }
 
     public double GetCpuUsage()
     {
         var currentTime = DateTime.UtcNow;
         var currentUsageMs = GetCpuUsageMs();
-        var totalTimeMs = (currentTime - _lastCpuTime).TotalMilliseconds;
+        var totalTimeMs = (currentTime - _lastCpuTime).TotalMilliseconds * _totalCores;
         var cpuUtil = (currentUsageMs - _lastCpuUsage) / totalTimeMs;
         _lastCpuTime = currentTime;
         _lastCpuUsage = currentUsageMs;
