@@ -13,8 +13,10 @@ public class ResourceMonitor : IResourceMonitor
     public ResourceMonitor()
     {
         _lastCpuTime = DateTime.UtcNow;
-        _lastCpuUsage = GetCpuUsageMs();
+        _lastCpuUsage = IsLinux ? GetCpuUsageMs() : default;
     }
+
+    public bool IsLinux => RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
 
     public double GetCpuUsage()
     {
@@ -45,7 +47,8 @@ public class ResourceMonitor : IResourceMonitor
 
     public void SetMonitor(Func<double, double, Task> monitorCallback, double interval = 10000)
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) return;
+        if (!IsLinux)
+            return;
         _currentTimer?.Stop();
         _currentTimer = new System.Timers.Timer(interval);
         _currentTimer.Elapsed += async (s, e) =>
