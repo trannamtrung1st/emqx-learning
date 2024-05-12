@@ -250,7 +250,7 @@ public class Worker : BackgroundService
             .WithAutoReconnectDelay(TimeSpan.FromSeconds(_configuration.GetValue<int>("MqttClientOptions:ReconnectDelaySecs")))
             .WithClientOptions(options)
             .Build();
-        var wrapper = new MqttClientWrapper(mqttClient);
+        var wrapper = new MqttClientWrapper(mqttClient, _stoppingToken);
         _mqttClients.Add(wrapper);
 
         mqttClient.ConnectedAsync += (e) => OnConnected(e, mqttClient);
@@ -451,10 +451,12 @@ internal class MqttClientWrapper
 {
     private CancellationTokenSource _tokenSource;
     private readonly IManagedMqttClient _client;
+    private readonly CancellationToken _stoppingToken;
 
-    public MqttClientWrapper(IManagedMqttClient client)
+    public MqttClientWrapper(IManagedMqttClient client, CancellationToken stoppingToken)
     {
         _client = client;
+        _stoppingToken = stoppingToken;
         ResetTokenSource();
     }
 
@@ -464,6 +466,7 @@ internal class MqttClientWrapper
     public void ResetTokenSource()
     {
         _tokenSource?.Dispose();
+        if (_stoppingToken.IsCancellationRequested) return;
         _tokenSource = new CancellationTokenSource();
         _tokenSource.Token.Register(() => ResetTokenSource());
     }
