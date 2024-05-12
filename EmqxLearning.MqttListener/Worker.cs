@@ -82,25 +82,20 @@ public class Worker : BackgroundService
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         var topic = _configuration["MqttClientOptions:Topic"];
-        var tasks = new List<Task>();
         // [TODO] graceful shutdown
         foreach (var wrapper in _mqttClients)
         {
             if (wrapper.Client.IsConnected)
             {
-                var task = wrapper.Client.UnsubscribeAsync(topic)
-                    .ContinueWith(async (_) =>
-                    {
-                        await wrapper.Client.InternalClient.DisconnectAsync(new MqttClientDisconnectOptions
-                        {
-                            SessionExpiryInterval = 1,
-                            Reason = MqttClientDisconnectOptionsReason.NormalDisconnection
-                        });
-                    });
-                tasks.Add(task);
+                await wrapper.Client.UnsubscribeAsync(topic);
+                await wrapper.Client.InternalClient.DisconnectAsync(new MqttClientDisconnectOptions
+                {
+                    SessionExpiryInterval = 1,
+                    Reason = MqttClientDisconnectOptionsReason.AdministrativeAction
+                });
+                await wrapper.Client.StopAsync();
             }
         }
-        await Task.WhenAll(tasks);
         await Task.Delay(DefaultShutdownWait);
         await base.StopAsync(cancellationToken);
     }
