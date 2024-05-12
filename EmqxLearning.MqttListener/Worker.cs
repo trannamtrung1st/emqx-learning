@@ -414,7 +414,17 @@ public class Worker : BackgroundService
     {
         base.Dispose();
         foreach (var wrapper in _mqttClients)
+        {
+            if (wrapper.Client.IsConnected)
+            {
+                // [TODO] graceful shutdown
+                wrapper.Client.InternalClient.DisconnectAsync(new MqttClientDisconnectOptions
+                {
+                    SessionExpiryInterval = 0
+                }).Wait();
+            }
             wrapper.Client.Dispose();
+        }
         _mqttClients.Clear();
         // [TODO] dispose others
     }
