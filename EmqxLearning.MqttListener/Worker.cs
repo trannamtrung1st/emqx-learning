@@ -20,6 +20,7 @@ public class Worker : BackgroundService
     private const int DefaultMovingAverageRange = 20;
     private const int DefaultConcurrencyCollectorInterval = 250;
     private const int DefaultLockSeconds = 3;
+    private const int DefaultShutdownWait = 3000;
     private const int AcceptedAvailableConcurrency = 10;
     private const int AcceptedQueueCount = 5;
 
@@ -76,6 +77,32 @@ public class Worker : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
             await Task.Delay(1000, stoppingToken);
+    }
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        var topic = _configuration["MqttClientOptions:Topic"];
+        var tasks = new List<Task>();
+        // [TODO] graceful shutdown
+        foreach (var wrapper in _mqttClients)
+        {
+            if (wrapper.Client.IsConnected)
+            {
+                var task = wrapper.Client.UnsubscribeAsync(topic)
+                    .ContinueWith(async (_) =>
+                    {
+                        await wrapper.Client.InternalClient.DisconnectAsync(new MqttClientDisconnectOptions
+                        {
+                            SessionExpiryInterval = 1,
+                            Reason = MqttClientDisconnectOptionsReason.NormalDisconnection
+                        });
+                    });
+                tasks.Add(task);
+            }
+        }
+        await Task.WhenAll(tasks);
+        await Task.Delay(DefaultShutdownWait);
+        await base.StopAsync(cancellationToken);
     }
 
     private void SetupCancellationTokens()
@@ -414,17 +441,7 @@ public class Worker : BackgroundService
     {
         base.Dispose();
         foreach (var wrapper in _mqttClients)
-        {
-            if (wrapper.Client.IsConnected)
-            {
-                // [TODO] graceful shutdown
-                wrapper.Client.InternalClient.DisconnectAsync(new MqttClientDisconnectOptions
-                {
-                    SessionExpiryInterval = 1
-                }).Wait();
-            }
             wrapper.Client.Dispose();
-        }
         _mqttClients.Clear();
         // [TODO] dispose others
     }
