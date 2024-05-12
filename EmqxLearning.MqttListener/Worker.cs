@@ -420,7 +420,7 @@ public class Worker : BackgroundService
                 // [TODO] graceful shutdown
                 wrapper.Client.InternalClient.DisconnectAsync(new MqttClientDisconnectOptions
                 {
-                    SessionExpiryInterval = 0
+                    SessionExpiryInterval = 1
                 }).Wait();
             }
             wrapper.Client.Dispose();
