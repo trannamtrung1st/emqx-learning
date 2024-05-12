@@ -39,10 +39,10 @@ Parallel.ForEach(clients, async (mqttClient, _, i) =>
     while (!cancellationToken.IsCancellationRequested)
     {
         var dict = new Dictionary<string, object>();
-        dict["deviceId"] = "device-large-payload";
+        dict["deviceId"] = $"device-large-payload-{i}";
         dict["timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         for (int idx = 0; idx < 7; idx++)
-            dict[$"numeric{idx}"] = Random.Shared.NextDouble();
+            dict[$"numeric_{i}_{idx}"] = Random.Shared.NextDouble();
         var topic = string.Format(topicFormat, "34e5ee62-429c-4724-b3d0-3891bd0a08c9", i);
         var message = new MqttApplicationMessageBuilder()
             .WithTopic(topic)
