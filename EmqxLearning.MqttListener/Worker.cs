@@ -438,7 +438,12 @@ public class Worker : BackgroundService
         foreach (var wrapper in _mqttClients)
             wrapper.Client.Dispose();
         _mqttClients.Clear();
-        // [TODO] dispose others
+        _concurrencyCollectorLock?.Dispose();
+        _queueCounts?.Clear();
+        _availableCounts?.Clear();
+        _resourceMonitor?.Stop();
+        _concurrencyCollector?.Dispose();
+        _circuitTokenSource?.Dispose();
     }
 }
 
