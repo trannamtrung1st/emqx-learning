@@ -5,5 +5,5 @@ namespace EmqxLearning.RabbitMqConsumer.Services.Abstracts;
 public interface IIngestionService
 {
     void Configure(Func<Task> reconnectConsumer);
-    Task HandleMessage(BasicDeliverEventArgs e, CancellationToken cancellationToken);
+    Task HandleMessage(string channelId, BasicDeliverEventArgs e, CancellationToken cancellationToken);
 }

@@ -26,13 +26,13 @@ public class IngestionService : IIngestionService
         _dataSource = NpgsqlDataSource.Create(_configuration.GetConnectionString("DeviceDb"));
     }
 
-    public async Task HandleMessage(BasicDeliverEventArgs e, CancellationToken cancellationToken)
+    public async Task HandleMessage(string channelId, BasicDeliverEventArgs e, CancellationToken cancellationToken)
     {
         var ingestionMessage = JsonSerializer.Deserialize<ReadIngestionMessage>(e.Body.ToArray());
         _logger.LogInformation("Metrics count {Count}", ingestionMessage.RawData.Count);
         var values = ConvertToSeriesRecords(ingestionMessage);
         await InsertToDb(values);
-        _rabbitMqConnectionManager.Channel.BasicAck(e.DeliveryTag, multiple: false);
+        _rabbitMqConnectionManager.GetChannel(channelId).BasicAck(e.DeliveryTag, multiple: false);
     }
 
     private static IEnumerable<object> ConvertToSeriesRecords(ReadIngestionMessage message)

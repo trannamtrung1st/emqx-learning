@@ -1,4 +1,5 @@
 using EmqxLearning.Shared.Services.Abstracts;
+using FLS;
 using RabbitMQ.Client;
 
 namespace EmqxLearning.Shared.Services;
@@ -9,15 +10,17 @@ public class RabbitMqConnectionManager : IRabbitMqConnectionManager, IDisposable
     private static readonly object _channelLock = new object();
     private ConnectionFactory _connectionFactory;
     private Action<IConnection> _configureConnection;
-    private Action<IModel> _configureChannel;
     private IConnection _currentConnection;
-    private IModel _currentChannel;
+    private readonly Dictionary<string, Action<IModel>> _configureChannels;
+    private readonly Dictionary<string, IModel> _channels;
 
     public IConnection Connection { get { lock (_connectionLock) { return _currentConnection; } } }
-    public IModel Channel { get { lock (_channelLock) { return _currentChannel; } } }
+    public IModel GetChannel(string channelId) => _channels[channelId];
 
     public RabbitMqConnectionManager()
     {
+        _configureChannels = new Dictionary<string, Action<IModel>>();
+        _channels = new Dictionary<string, IModel>();
     }
 
     public void ConfigureConnection(ConnectionFactory connectionFactory, Action<IConnection> configure)
@@ -26,9 +29,9 @@ public class RabbitMqConnectionManager : IRabbitMqConnectionManager, IDisposable
         _configureConnection = configure;
     }
 
-    public void ConfigureChannel(Action<IModel> configure)
+    public void ConfigureChannel(string channelId, Action<IModel> configure)
     {
-        _configureChannel = configure;
+        _configureChannels[channelId] = configure;
     }
 
     public void Connect()
@@ -36,7 +39,7 @@ public class RabbitMqConnectionManager : IRabbitMqConnectionManager, IDisposable
         try
         {
             CreateNewConnection();
-            CreateNewChannel();
+            _configureChannels.Keys.ForEach(key => CreateNewChannel(key));
         }
         catch
         {
@@ -61,14 +64,15 @@ public class RabbitMqConnectionManager : IRabbitMqConnectionManager, IDisposable
         }
     }
 
-    private bool CreateNewChannel()
+    private bool CreateNewChannel(string channelId)
     {
         if (Connection == null) throw new ArgumentException(nameof(Connection));
         if (!Connection.IsOpen) return false;
         lock (_channelLock)
         {
-            _currentChannel = Connection.CreateModel();
-            if (_configureChannel != null) _configureChannel(_currentChannel);
+            var channel = Connection.CreateModel();
+            _channels[channelId] = channel;
+            _configureChannels[channelId](channel);
         }
         return true;
     }
@@ -81,11 +85,14 @@ public class RabbitMqConnectionManager : IRabbitMqConnectionManager, IDisposable
 
     private void DisposeChannel()
     {
-        if (_currentChannel?.IsClosed != true)
+        _channels.Values.ForEach(ch =>
         {
-            _currentChannel?.Close();
-            _currentChannel?.Dispose();
-        }
+            if (ch?.IsClosed != true)
+            {
+                ch?.Close();
+                ch?.Dispose();
+            }
+        });
     }
 
     private void DisposeConnection()

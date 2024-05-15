@@ -15,17 +15,7 @@ var numOfDevices = GetArgument<int>(args, "n");
 var interval = GetArgument<int>(args, "I");
 var tcpServer = GetRawEnv("MqttClientOptions__TcpServer");
 var topicFormat = GetRawEnv("MqttClientOptions__TopicFormat");
-var messagePayload = GetRawArgument(args, "m");
-if (messagePayload == null)
-{
-    var dict = new Dictionary<string, object>();
-    dict["deviceId"] = "device-large-payload";
-    dict["timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-    for (int i = 0; i < 50; i++)
-        dict[$"numeric{i}"] = Random.Shared.NextDouble();
-    dict["text"] = new string('*', 2500);
-    messagePayload = JsonSerializer.Serialize(dict);
-}
+var noOfMetrics = GetArgument<int?>(args, "m") ?? 10;
 var qos = GetArgument<MqttQualityOfServiceLevel>(args, "q");
 var factory = new MqttFactory();
 Console.WriteLine("Setup ...");
@@ -48,6 +38,12 @@ Parallel.ForEach(clients, async (mqttClient, _, i) =>
 {
     while (!cancellationToken.IsCancellationRequested)
     {
+        var dict = new Dictionary<string, object>();
+        dict["deviceId"] = $"device-{i}";
+        dict["timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        for (int m = 0; m < noOfMetrics; m++)
+            dict[$"numeric_{i}_{m}"] = Random.Shared.NextDouble();
+        var messagePayload = JsonSerializer.SerializeToUtf8Bytes(dict);
         var message = new MqttApplicationMessageBuilder()
             .WithTopic(string.Format(topicFormat, i, i))
             .WithPayload(messagePayload)

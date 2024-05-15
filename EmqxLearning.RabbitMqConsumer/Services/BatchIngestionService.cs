@@ -52,12 +52,12 @@ public class BatchIngestionService : IIngestionService, IDisposable
         _reconnectConsumer = reconnectConsumer;
     }
 
-    public Task HandleMessage(BasicDeliverEventArgs e, CancellationToken cancellationToken)
+    public Task HandleMessage(string channelId, BasicDeliverEventArgs e, CancellationToken cancellationToken)
     {
         _stoppingToken = cancellationToken;
         var ingestionMessage = JsonSerializer.Deserialize<ReadIngestionMessage>(e.Body.ToArray());
         _logger.LogInformation("Metrics count {Count}", ingestionMessage.RawData.Count);
-        _messages.Enqueue(new(ingestionMessage, e));
+        _messages.Enqueue(new(channelId, ingestionMessage, e));
         return Task.CompletedTask;
     }
 
@@ -117,7 +117,7 @@ public class BatchIngestionService : IIngestionService, IDisposable
         }
         foreach (var message in batch)
         {
-            var channel = _rabbitMqConnectionManager.Channel;
+            var channel = _rabbitMqConnectionManager.GetChannel(message.ChannelId);
             await _transientErrorsPipeline.ExecuteAsync(async (token) =>
             {
                 await _circuitLock.WaitAsync(token);
@@ -265,10 +265,12 @@ class IngestionMessageComparer : IComparer<WrappedIngestionMessage>
 
 struct WrappedIngestionMessage
 {
+    public string ChannelId { get; }
     public ReadIngestionMessage Payload { get; }
     public BasicDeliverEventArgs EventArgs { get; }
-    public WrappedIngestionMessage(ReadIngestionMessage payload, BasicDeliverEventArgs eventArgs)
+    public WrappedIngestionMessage(string channelId, ReadIngestionMessage payload, BasicDeliverEventArgs eventArgs)
     {
+        ChannelId = channelId;
         Payload = payload;
         EventArgs = eventArgs;
     }

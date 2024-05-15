@@ -35,27 +35,64 @@ public class Worker : BackgroundService
         // [TODO] add circuit token
         _stoppingToken = stoppingToken;
 
-        _ingestionService.Configure(reconnectConsumer: SetupConsumers);
-        await SetupConsumers();
+        _ingestionService.Configure(reconnectConsumer: ConnectConsumers);
+        InitConsumers();
+        await ConnectConsumers();
 
         while (!stoppingToken.IsCancellationRequested)
             await Task.Delay(1000, _stoppingToken);
     }
 
-    private Task SetupConsumers()
+    private void InitConsumers()
     {
-        var channel = _rabbitMqConnectionManager.Channel;
         var consumerCount = _configuration.GetValue<int>("ConsumerCount");
         for (int i = 0; i < consumerCount; i++)
         {
+            var channelId = i.ToString();
+            _rabbitMqConnectionManager.ConfigureChannel(channelId, SetupRabbitMqChannel(channelId));
+        }
+    }
+
+    private Task ConnectConsumers()
+    {
+        _connectionErrorsPipeline.Execute(() => _rabbitMqConnectionManager.Connect());
+        var consumerCount = _configuration.GetValue<int>("ConsumerCount");
+        for (int i = 0; i < consumerCount; i++)
+        {
+            var channelId = i.ToString();
+            var channel = _rabbitMqConnectionManager.GetChannel(channelId);
             var consumer = new AsyncEventingBasicConsumer(channel);
-            consumer.Received += OnMessageReceived;
+            consumer.Received += (s, e) => OnMessageReceived(s, e, channelId);
             _connectionErrorsPipeline.Execute(() =>
                 channel.BasicConsume(queue: "ingestion", autoAck: false, consumer: consumer));
         }
+
         return Task.CompletedTask;
     }
 
-    private Task OnMessageReceived(object sender, BasicDeliverEventArgs e)
-        => _ingestionService.HandleMessage(e, _stoppingToken);
+    private Action<IModel> SetupRabbitMqChannel(string channelId)
+    {
+        Action<IModel> configureChannel = (channel) =>
+        {
+            var rabbitMqChannelOptions = _configuration.GetSection("RabbitMqChannel");
+            channel.BasicQos(
+                prefetchSize: 0, // RabbitMQ not implemented
+                prefetchCount: rabbitMqChannelOptions.GetValue<ushort>("PrefetchCount"),
+                global: false);
+            channel.ContinuationTimeout = _configuration.GetValue<TimeSpan?>("RabbitMqChannel:ContinuationTimeout") ?? channel.ContinuationTimeout;
+            channel.ModelShutdown += (sender, e) => OnModelShutdown(sender, e, channelId);
+        };
+        return configureChannel;
+    }
+
+    private void OnModelShutdown(object sender, ShutdownEventArgs e, string channelId)
+    {
+        if (e.Exception != null)
+            _logger.LogError(e.Exception, "RabbitMQ channel {ChannelId} shutdown reason: {Reason} | Message: {Message}", channelId, e.Cause, e.Exception?.Message);
+        else
+            _logger.LogInformation("RabbitMQ channel {ChannelId} shutdown reason: {Reason}", channelId, e.Cause);
+    }
+
+    private Task OnMessageReceived(object sender, BasicDeliverEventArgs e, string channelId)
+            => _ingestionService.HandleMessage(channelId, e, _stoppingToken);
 }
