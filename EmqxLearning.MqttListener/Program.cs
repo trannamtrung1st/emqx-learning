@@ -11,7 +11,8 @@ IHost host = Host.CreateDefaultBuilder(args)
         services.AddHostedService<Worker>();
         services.AddResourceMonitor()
             .AddFuzzyThreadController()
-            .AddDynamicRateLimiter();
+            .AddDynamicRateLimiter()
+            .AddRedis(connStr: context.Configuration.GetConnectionString("Redis"));
 
         SetupRabbitMq(services, context.Configuration);
 

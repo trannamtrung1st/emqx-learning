@@ -11,21 +11,23 @@ services:
       dockerfile: EmqxLearning.MqttListener/Dockerfile
     environment:
       Logging__LogLevel__Default: Warning
+      ConnectionStrings__Redis: redis1:6379,allowAdmin=true,syncTimeout=10000,asyncTimeout=10000
       MqttClientOptions__TcpServer: node1.emqx.io
       MqttClientOptions__CleanSession: false
       MqttClientOptions__SessionExpiryInterval: 120
       MqttClientOptions__ReconnectDelaySecs: 15
       MqttClientOptions__Topic: $$share/ahi/projectId/+/devices/+/telemetry
       MqttClientOptions__Qos: 1
-      ReceiveDelay: 0
-      ProcessingTime: 20
-      InitialConcurrencyLimit: 8
-      NumberOfConnections: 20
-      BackgroundProcessing: true
-      ScaleFactor: 50
-      ScaleCheckInterval: 5000
+      AppSettings__ReceiveDelay: 0
+      AppSettings__ProcessingTime: 20
+      AppSettings__InitialConcurrencyLimit: 8
+      AppSettings__NumberOfConnections: 20
+      AppSettings__BackgroundProcessing: true
+      AppSettings__ScaleFactor: 50
+      AppSettings__ScaleCheckInterval: 5000
+      AppSettings__CheckDuplicates: true
       RabbitMqClient__HostName: rabbitmq1
-      RabbitMqChannel__PublisherConfirmBatchSize: 128
+      RabbitMqChannel__PublisherConfirmBatchSize: 64
     networks:
       - emqx-bridge
     deploy:
@@ -39,6 +41,8 @@ services:
         condition: service_healthy
       rabbitmq1:
         condition: service_healthy
+      redis1:
+        condition: service_started
 
   # MQTT publishers
   mqtt-publisher-1:
@@ -146,7 +150,8 @@ services:
     environment:
       - "EMQX_NODE_NAME=emqx@node1.emqx.io"
       - "EMQX_MQTT__MAX_MQUEUE_LEN=1000000"
-      - "EMQX_MQTT__MAX_INFLIGHT=516"
+      - "EMQX_MQTT__MAX_INFLIGHT=256"
+      - "EMQX_MQTT__RETRY_INTERVAL=300s"
       # - "EMQX_CLUSTER__DISCOVERY_STRATEGY=static"
       # - "EMQX_CLUSTER__STATIC__SEEDS=[emqx@node1.emqx.io,emqx@node2.emqx.io]"
     healthcheck:
@@ -173,7 +178,8 @@ services:
   #   environment:
   #     - "EMQX_NODE_NAME=emqx@node2.emqx.io"
   #     - "EMQX_MQTT__MAX_MQUEUE_LEN=1000000"
-  #     - "EMQX_MQTT__MAX_INFLIGHT=516"
+  #     - "EMQX_MQTT__MAX_INFLIGHT=256"
+  #     - "EMQX_MQTT__RETRY_INTERVAL=300s"
   #     - "EMQX_CLUSTER__DISCOVERY_STRATEGY=static"
   #     - "EMQX_CLUSTER__STATIC__SEEDS=[emqx@node1.emqx.io,emqx@node2.emqx.io]"
   #   healthcheck:
@@ -230,6 +236,14 @@ services:
         limits:
           cpus: "6"
           memory: "2G"
+
+  # Redis
+  redis1:
+    image: redis:6.2.6-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - emqx-bridge
 
   # Azure services
   azurite:

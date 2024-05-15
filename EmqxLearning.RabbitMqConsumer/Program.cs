@@ -7,6 +7,7 @@ using EmqxLearning.Shared.Extensions;
 using Polly.Registry;
 using EmqxLearning.Shared.Services.Abstracts;
 using EmqxLearning.Shared.Exceptions;
+using EmqxLearning.Shared.Helpers;
 
 IHost host = Host.CreateDefaultBuilder(args)
     .ConfigureServices((context, services) =>

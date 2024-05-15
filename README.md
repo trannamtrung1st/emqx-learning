@@ -3,11 +3,11 @@
 ## Performance test
 + To start benchmark test using `mqtt-publisher`, access the interactive shell of `mqtt-publisher` container, then execute below command:
 ```sh
-./EmqxLearning.MqttPublisher -n=5000 -I=980 -q=1 -m='{"messageId":1,"temperature":32.81665161616013,"humidity":71.98951628617453,"deviceId":"DB","timestamp":1679898067325,"ack":true,"snr":9,"txt":"text"}'
+./EmqxLearning.MqttPublisher -n=5000 -I=980 -q=1 -m=10
 ```
-Large payload ~4KB (remove `-m` option)
+Large payload, e.g, 100 metrics
 ```sh
-./EmqxLearning.MqttPublisher -n=3000 -I=980 -q=1
+./EmqxLearning.MqttPublisher -n=3000 -I=980 -q=1 -m=100
 ```
 + To start benchmark test using `emqtt-bench`, access the interactive shell of `emqtt-bench` container, then execute below command:
 ```sh

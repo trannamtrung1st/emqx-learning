@@ -2,6 +2,7 @@ using EmqxLearning.Shared.Services;
 using EmqxLearning.Shared.Services.Abstracts;
 using Microsoft.Extensions.DependencyInjection;
 using RabbitMQ.Client;
+using StackExchange.Redis;
 
 namespace EmqxLearning.Shared.Extensions;
 
@@ -19,6 +20,18 @@ public static class ServiceCollectionExtensions
             return rabbitMqConnectionManager;
         });
     }
+
+    public static IServiceCollection AddRedis(this IServiceCollection services, string connStr)
+    {
+        return services
+            .AddSingleton<ConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(connStr))
+            .AddSingleton<IConnectionMultiplexer>(provider =>
+            {
+                var multiplexer = provider.GetRequiredService<ConnectionMultiplexer>();
+                return multiplexer;
+            });
+    }
+
 
     public static IServiceCollection AddFuzzyThreadController(this IServiceCollection services)
     {
