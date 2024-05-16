@@ -111,7 +111,7 @@ public class Worker : BackgroundService
                     Reason = MqttClientDisconnectOptionsReason.AdministrativeAction
                 });
                 await wrapper.Client.StopAsync();
-            });
+            }, cancellationToken);
             processingTasks.Add(task);
         }
 
