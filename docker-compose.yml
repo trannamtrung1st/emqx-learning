@@ -36,6 +36,7 @@ services:
         limits:
           cpus: "1"
           memory: "250M"
+    stop_grace_period: 1h
     depends_on:
       emqx1:
         condition: service_healthy

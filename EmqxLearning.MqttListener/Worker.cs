@@ -83,20 +83,39 @@ public class Worker : BackgroundService
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         var topic = _configuration["MqttClientOptions:Topic"];
-        // [TODO] graceful shutdown
         foreach (var wrapper in _mqttClients)
         {
             if (wrapper.Client.IsConnected)
-            {
                 await wrapper.Client.UnsubscribeAsync(topic);
+        }
+
+        var checkLastMessageRangeInSecs = _configuration.GetValue<int>("AppSettings:CheckLastMessageRangeInSecs");
+        var processingTasks = new List<Task>();
+        foreach (var wrapper in _mqttClients)
+        {
+            var task = Task.Run(async () =>
+            {
+                bool completed = false;
+                do
+                {
+                    var hasMessageIncoming = DateTime.UtcNow.AddSeconds(-checkLastMessageRangeInSecs) <= wrapper.LastMessageTime;
+                    completed = !hasMessageIncoming && wrapper.BatchCount == 0 && wrapper.BatchId == null && !wrapper.LastBatchFlushing;
+                    _logger.LogDebug("Incoming: {Incoming} - BatchCount: {BatchCount} - BatchId: {BatchId} - Flushing: {Flushing}",
+                        hasMessageIncoming, wrapper.BatchCount, wrapper.BatchId, wrapper.LastBatchFlushing);
+                    if (!completed) await Task.Delay(1000);
+                } while (!completed);
+
                 await wrapper.Client.InternalClient.DisconnectAsync(new MqttClientDisconnectOptions
                 {
                     SessionExpiryInterval = 1,
                     Reason = MqttClientDisconnectOptionsReason.AdministrativeAction
                 });
                 await wrapper.Client.StopAsync();
-            }
+            });
+            processingTasks.Add(task);
         }
+
+        await Task.WhenAll(processingTasks);
         await Task.Delay(_configuration.GetValue<int>("AppSettings:ShutdownWait"));
         await base.StopAsync(cancellationToken);
     }
@@ -296,6 +315,7 @@ public class Worker : BackgroundService
     {
         try
         {
+            wrapper.LastMessageTime = DateTime.UtcNow;
             e.AutoAcknowledge = false;
             await _dynamicRateLimiter.Acquire(cancellationToken: wrapper.TokenSource.Token);
             var _ = Task.Run(async () =>
@@ -354,6 +374,7 @@ public class Worker : BackgroundService
         var batchSize = _configuration.GetValue<int>("RabbitMqChannel:PublisherConfirmBatchSize");
         var channel = _rabbitMqConnectionManager.GetChannel(wrapper.ChannelId);
         List<MessageWrapper> confirmBatch = null;
+        Guid? flushBatchId = null;
         await wrapper.SafeAccessBatch((batch) =>
         {
             if (batch.Count > 0 && (isFlushInterval || batch.Count >= batchSize))
@@ -361,8 +382,18 @@ public class Worker : BackgroundService
                 confirmBatch = new List<MessageWrapper>();
                 while (batch.TryDequeue(out var message))
                     confirmBatch.Add(message);
+                flushBatchId = wrapper.BatchId;
+                wrapper.LastBatchFlushing = true;
             }
-            if (message != null) batch.Enqueue(message);
+            if (message != null)
+            {
+                if (wrapper.LastBatchFlushing || wrapper.BatchId == null)
+                {
+                    wrapper.BatchId = Guid.NewGuid();
+                    wrapper.LastBatchFlushing = false;
+                }
+                batch.Enqueue(message);
+            }
         });
 
         if (confirmBatch == null) return;
@@ -402,6 +433,14 @@ public class Worker : BackgroundService
             ));
         }
         await Task.WhenAll(tasks);
+        await wrapper.SafeAccessBatch((batch) =>
+        {
+            if (wrapper.BatchId == flushBatchId && wrapper.LastBatchFlushing)
+            {
+                wrapper.BatchId = null;
+                wrapper.LastBatchFlushing = false;
+            }
+        });
     }
 
     private async Task AcknowledgeAsync(MqttApplicationMessageReceivedEventArgs e, CancellationToken cancellationToken)
@@ -604,10 +643,14 @@ internal class MqttClientWrapper
         ResetTokenSource();
     }
 
+    public DateTime LastMessageTime { get; set; }
     public IManagedMqttClient Client => _client;
     public ManagedMqttClientOptions ManagedOptions => _managedOptions;
     public CancellationTokenSource TokenSource => _tokenSource;
     public System.Timers.Timer FlushBatchTimer { get; }
+    public int BatchCount => _batch.Count;
+    public Guid? BatchId { get; set; }
+    public bool LastBatchFlushing { get; set; }
     public string ChannelId { get; }
 
     public async Task SafeAccessBatch(Action<Queue<MessageWrapper>> action)

@@ -20,6 +20,11 @@ IHost host = Host.CreateDefaultBuilder(args)
         var resilienceSettings = configuration.GetSection("ResilienceSettings");
         SetupResilience(services, resilienceSettings);
     })
+    .ConfigureHostOptions((context, options) =>
+    {
+        var shutdownTimeout = context.Configuration.GetValue<TimeSpan>("AppSettings:ShutdownTimeout");
+        options.ShutdownTimeout = shutdownTimeout;
+    })
     .Build();
 
 await host.RunAsync();
