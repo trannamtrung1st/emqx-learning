@@ -323,18 +323,8 @@ public class Worker : BackgroundService
                 try
                 {
                     var payloadHash = Hashing.Md5Hash(e.ApplicationMessage.PayloadSegment.Array);
-                    if (_configuration.GetValue<bool>("AppSettings:CheckDuplicates"))
-                    {
-                        var cacheHit = await _cacheDb.StringGetAsync(payloadHash);
-                        if (cacheHit.HasValue)
-                        {
-                            Interlocked.Increment(ref _cacheHitCount);
-                            _logger.LogWarning("Cache hit {Count}", _cacheHitCount);
-                            await AcknowledgeAsync(e, wrapper.TokenSource.Token);
-                            return;
-                        }
-                    }
-
+                    var duplicated = await CheckAndProcessDuplicates(e, wrapper, payloadHash);
+                    if (duplicated) return;
                     await HandleMessage(new(e, payloadHash), wrapper);
                 }
                 catch (DownstreamDisconnectedException ex)
@@ -351,6 +341,34 @@ public class Worker : BackgroundService
         {
             _logger.LogError(ex, ex.Message);
         }
+    }
+
+    private async Task<bool> CheckAndProcessDuplicates(MqttApplicationMessageReceivedEventArgs e, MqttClientWrapper wrapper, byte[] payloadHash)
+    {
+        var hashExpiryTime = _configuration.GetValue<TimeSpan>("AppSettings:HashExpiryTime");
+        if (_configuration.GetValue<bool>("AppSettings:CheckDuplicates"))
+        {
+            var cacheHit = await _cacheDb.StringGetAsync(payloadHash);
+            if (cacheHit.HasValue)
+            {
+                Interlocked.Increment(ref _cacheHitCount);
+                _logger.LogWarning("Cache hit {Count}", _cacheHitCount);
+                await AcknowledgeAsync(e, wrapper.TokenSource.Token);
+                return true;
+            }
+        }
+        await _cacheDb.StringSetAsync(key: payloadHash, value: true, expiry: hashExpiryTime);
+        return false;
+    }
+
+    private async Task RemoveCaches(IEnumerable<MessageWrapper> messages)
+    {
+        var batch = _cacheDb.CreateBatch();
+        var tasks = new List<Task>();
+        foreach (var message in messages)
+            tasks.Add(batch.KeyDeleteAsync(message.PayloadHash));
+        batch.Execute();
+        await Task.WhenAll(tasks);
     }
 
     private async Task HandleOpenCircuit()
@@ -419,20 +437,14 @@ public class Worker : BackgroundService
         }
         catch (Exception ex)
         {
+            await RemoveCaches(confirmBatch);
             throw new DownstreamDisconnectedException(ex.Message, innerException: ex);
         }
 
         // [TODO] handle when confirmed == false
-        var hashExpiryTime = _configuration.GetValue<TimeSpan>("AppSettings:HashExpiryTime");
-        var tasks = new List<Task>();
         foreach (var item in confirmBatch)
-        {
-            tasks.Add(Task.WhenAll(
-                _cacheDb.StringSetAsync(item.PayloadHash, true, expiry: hashExpiryTime),
-                AcknowledgeAsync(item.EventArgs, wrapper.TokenSource.Token)
-            ));
-        }
-        await Task.WhenAll(tasks);
+            await AcknowledgeAsync(item.EventArgs, wrapper.TokenSource.Token);
+
         await wrapper.SafeAccessBatch((batch) =>
         {
             if (wrapper.BatchId == flushBatchId && wrapper.LastBatchFlushing)
