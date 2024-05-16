@@ -129,6 +129,23 @@ services:
   #     rabbitmq1:
   #       condition: service_healthy
 
+  # MQTTX web
+  mqttx-web:
+    image: emqx/mqttx-web:latest
+    ports:
+      - 8888:80
+    networks:
+      - emqx-bridge
+
+  # libcoap
+  libcoap:
+    image: opensourcefoundries/libcoap:latest
+    stdin_open: true
+    tty: true
+    networks:
+      - emqx-bridge
+    entrypoint: ["bin/sh"]
+
   # EMQTT bench mark
   # emqtt-bench:
   #   image: emqx-learning/custom-emqtt-bench:latest
@@ -155,6 +172,17 @@ services:
       EMQX_MQTT__MAX_MQUEUE_LEN: 1000000
       EMQX_MQTT__MAX_INFLIGHT: 256
       EMQX_MQTT__RETRY_INTERVAL: "300s"
+
+      # EMQX_GATEWAY__COAP__MOUNTPOINT: "coap/"
+      EMQX_GATEWAY__COAP__CONNECTION_REQUIRED: false
+      EMQX_GATEWAY__COAP__ENABLE_STATS: true
+      EMQX_GATEWAY__COAP__LISTENERS__UDP__CUSTOMCOAP__BIND: "5683"
+      EMQX_GATEWAY__COAP__LISTENERS__UDP__CUSTOMCOAP__MAX_CONNECTIONS: "1000000"
+      EMQX_GATEWAY__COAP__LISTENERS__UDP__CUSTOMCOAP__MAX_CONN_RATE: "1000"
+      EMQX_GATEWAY__COAP__LISTENERS__UDP__CUSTOMCOAP__UDP_OPTIONS__BUFFER: "2048"
+      EMQX_GATEWAY__COAP__LISTENERS__UDP__CUSTOMCOAP__UDP_OPTIONS__SNDBUF: "2048"
+      EMQX_GATEWAY__COAP__LISTENERS__UDP__CUSTOMCOAP__UDP_OPTIONS__RECBUF: "2048"
+
       # EMQX_CLUSTER__DISCOVERY_STRATEGY: static
       # EMQX_CLUSTER__STATIC__SEEDS: "[emqx@node1.emqx.io,emqx@node2.emqx.io]"
     healthcheck:
@@ -172,6 +200,7 @@ services:
       - 8084:8084
       - 8883:8883
       - 18083:18083
+      - 5684:5683/udp
     # volumes:
     #   - $PWD/emqx1_data:/opt/emqx/data
 

@@ -14,6 +14,12 @@ Large payload, e.g, 100 metrics
 ./custom_eqmtt_bench.sh 10 -c 100 -I 100 -q 1 -m '{"messageId":1,"temperature":32.81665161616013,"humidity":71.98951628617453,"deviceId":"DB","timestamp":1679898067325,"ack":true,"snr":9,"txt":"text"}'
 ```
 
+## CoAP publish
++ To publish test message CoAP, execute bellow command in lipcoap container
+```sh
+coap-client -m post -e '{"messageId":1,"temperature":32.81665161616013,"humidity":71.98951628617453,"deviceId":"DB","timestamp":1679898067325,"ack":true,"snr":9,"txt":"text"}' "coap://emqx1/ps/projectId/1/devices/1/telemetry?qos=1"
+```
+
 ## Utilities
 + To check number of connections
 ```sql
