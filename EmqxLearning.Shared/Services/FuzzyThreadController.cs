@@ -61,8 +61,8 @@ public class FuzzyThreadController : IFuzzyThreadController
     {
         var threadScale = (int)Math.Round((DefaultIdealUsage - _fuzzyEngine.Defuzzify(new
         {
-            Cpu = cpu,
-            Memory = memory
+            Cpu = cpu > 1 ? 1 : cpu,
+            Memory = memory > 1 ? 1 : memory
         })) * factor);
         return threadScale;
     }
