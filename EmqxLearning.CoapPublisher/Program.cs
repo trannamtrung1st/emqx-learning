@@ -31,6 +31,7 @@ for (int i = 0; i < numOfDevices; i++)
         .WithHost(coapServer)
         .WithPort(port)
         .Build();
+    connectOptions.CommunicationTimeout = TimeSpan.FromSeconds(60);
     await coapClient.ConnectAsync(connectOptions, cancellationToken);
     clients.Add(coapClient);
 }
@@ -56,7 +57,7 @@ Parallel.ForEach(clients, async (coapClient, _, i) =>
             .WithQuery(new[] { $"qos={qos}" })
             .WithPayload(messagePayload)
             .Build();
-        var response = await coapClient.RequestAsync(request, cancellationToken);
+        await coapClient.RequestAsync(request, cancellationToken);
         await Task.Delay(interval, cancellationToken);
     }
 });
