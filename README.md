@@ -5,9 +5,13 @@
 ```sh
 ./EmqxLearning.MqttPublisher -n=5000 -I=980 -q=1 -m=10
 ```
-Large payload, e.g, 100 metrics
++ Large payload, e.g, 100 metrics
 ```sh
 ./EmqxLearning.MqttPublisher -n=3000 -I=980 -q=1 -m=100
+```
++ Use CoAP publisher
+```sh
+./EmqxLearning.CoapPublisher -n=5000 -I=980 -q=1 -m=10
 ```
 + To start benchmark test using `emqtt-bench`, access the interactive shell of `emqtt-bench` container, then execute below command:
 ```sh

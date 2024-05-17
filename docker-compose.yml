@@ -59,7 +59,28 @@ services:
     networks:
       - emqx-bridge
     deploy:
-      replicas: 3
+      replicas: 1
+    depends_on:
+      emqx1:
+        condition: service_healthy
+      rabbitmq1:
+        condition: service_healthy
+
+  # CoAP publishers
+  coap-publisher-1:
+    image: emqx-learning/coap-publisher:latest
+    build:
+      context: .
+      dockerfile: EmqxLearning.CoapPublisher/Dockerfile
+    environment:
+      - CoapClientOptions__CoapServer=node1.emqx.io
+      - CoapClientOptions__TopicFormat=projectId/{0}/devices/{1}/telemetry
+    stdin_open: true
+    tty: true
+    networks:
+      - emqx-bridge
+    deploy:
+      replicas: 1
     depends_on:
       emqx1:
         condition: service_healthy
@@ -178,7 +199,7 @@ services:
       EMQX_GATEWAY__COAP__ENABLE_STATS: true
       EMQX_GATEWAY__COAP__LISTENERS__UDP__CUSTOMCOAP__BIND: "5683"
       EMQX_GATEWAY__COAP__LISTENERS__UDP__CUSTOMCOAP__MAX_CONNECTIONS: "1000000"
-      EMQX_GATEWAY__COAP__LISTENERS__UDP__CUSTOMCOAP__MAX_CONN_RATE: "1000"
+      EMQX_GATEWAY__COAP__LISTENERS__UDP__CUSTOMCOAP__MAX_CONN_RATE: "10000"
       EMQX_GATEWAY__COAP__LISTENERS__UDP__CUSTOMCOAP__UDP_OPTIONS__BUFFER: "2048"
       EMQX_GATEWAY__COAP__LISTENERS__UDP__CUSTOMCOAP__UDP_OPTIONS__SNDBUF: "2048"
       EMQX_GATEWAY__COAP__LISTENERS__UDP__CUSTOMCOAP__UDP_OPTIONS__RECBUF: "2048"

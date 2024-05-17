@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using EmqxLearning.Shared.Helpers;
 using MQTTnet;
 using MQTTnet.Client;
 using MQTTnet.Protocol;
@@ -11,12 +12,12 @@ Console.CancelKeyPress += (s, e) =>
     e.Cancel = true;
 };
 var cancellationToken = cts.Token;
-var numOfDevices = GetArgument<int>(args, "n");
-var interval = GetArgument<int>(args, "I");
-var tcpServer = GetRawEnv("MqttClientOptions__TcpServer");
-var topicFormat = GetRawEnv("MqttClientOptions__TopicFormat");
-var noOfMetrics = GetArgument<int?>(args, "m") ?? 10;
-var qos = GetArgument<MqttQualityOfServiceLevel>(args, "q");
+var numOfDevices = ConsoleHelper.GetArgument<int>(args, "n");
+var interval = ConsoleHelper.GetArgument<int>(args, "I");
+var tcpServer = ConsoleHelper.GetRawEnv("MqttClientOptions__TcpServer");
+var topicFormat = ConsoleHelper.GetRawEnv("MqttClientOptions__TopicFormat");
+var noOfMetrics = ConsoleHelper.GetArgument<int?>(args, "m") ?? 10;
+var qos = ConsoleHelper.GetArgument<MqttQualityOfServiceLevel>(args, "q");
 var factory = new MqttFactory();
 Console.WriteLine("Setup ...");
 
@@ -56,22 +57,3 @@ Parallel.ForEach(clients, async (mqttClient, _, i) =>
 
 while (!cancellationToken.IsCancellationRequested)
     await Task.Delay(1000);
-
-// static T GetEnv<T>(string varName) => JsonSerializer.Deserialize<T>(GetRawEnv(varName));
-
-static string GetRawEnv(string varName) => Environment.GetEnvironmentVariable(varName);
-
-static T GetArgument<T>(string[] args, string argName)
-{
-    var value = GetRawArgument(args, argName);
-    if (value == null) return default;
-    return JsonSerializer.Deserialize<T>(value);
-}
-
-static string GetRawArgument(string[] args, string argName)
-{
-    var arg = args.FirstOrDefault(a => a.StartsWith($"-{argName}="));
-    if (arg == null) return null;
-    var value = arg[(arg.IndexOf('=') + 1)..];
-    return value;
-}

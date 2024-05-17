@@ -1,58 +1,65 @@
 ﻿using System.Text.Json;
-using CoAP;
+using CoAPnet;
+using CoAPnet.Client;
+using EmqxLearning.Shared.Helpers;
 
-CoapPublish("127.0.0.1", 5684, "test-coap-mqtt", 5000);
-
-static void CoapPublish(string host, int port, string topic, int delayInMilliseconds, CancellationToken cancellationToken = default)
+using var cts = new CancellationTokenSource();
+Console.CancelKeyPress += (s, e) =>
 {
-    var clientId = "COAPPUB";
-    var client = new CoapClient(new Uri($"coap://{host}:{port}/mqtt/connection?clientid={clientId}"));
-    var response = client.Post("");
-    var token = response.ResponseText;
-    Console.WriteLine($"Connection token {token}");
-    client.Uri = new Uri($"coap://{host}:{port}/mqtt/{topic}?clientid={clientId}&token={token}&qos=1");
+    Console.WriteLine("Canceling ...");
+    cts.Cancel();
+    e.Cancel = true;
+};
+var cancellationToken = cts.Token;
+var numOfDevices = ConsoleHelper.GetArgument<int>(args, "n");
+var interval = ConsoleHelper.GetArgument<int>(args, "I");
+var coapServer = ConsoleHelper.GetRawEnv("CoapClientOptions__CoapServer");
+var topicFormat = ConsoleHelper.GetRawEnv("CoapClientOptions__TopicFormat");
+var port = ConsoleHelper.GetArgument<int?>(args, "p") ?? 5683;
+var noOfMetrics = ConsoleHelper.GetArgument<int?>(args, "m") ?? 10;
+var qos = ConsoleHelper.GetArgument<int>(args, "q");
+var coapFactory = new CoapFactory();
 
-    double minTemperature = 20;
-    double minHumidity = 60;
-    int messageId = 1;
-    Random rand = new Random();
+Console.WriteLine("Setup ...");
 
+var clients = new List<ICoapClient>();
+
+for (int i = 0; i < numOfDevices; i++)
+{
+    var coapClient = coapFactory.CreateClient();
+    var connectOptions = new CoapClientConnectOptionsBuilder()
+        .WithHost(coapServer)
+        .WithPort(port)
+        .Build();
+    await coapClient.ConnectAsync(connectOptions, cancellationToken);
+    clients.Add(coapClient);
+}
+
+Console.WriteLine("Running ...");
+
+Parallel.ForEach(clients, async (coapClient, _, i) =>
+{
     while (!cancellationToken.IsCancellationRequested)
     {
-        double currentTemperature = minTemperature + rand.NextDouble() * 15;
-        double currentHumidity = minHumidity + rand.NextDouble() * 20;
-        int random = rand.Next(1, 10);
-        var payload = GetPayload(messageId, currentTemperature, currentHumidity, random);
-        var serializedPayload = JsonSerializer.Serialize(payload);
+        var dict = new Dictionary<string, object>();
+        dict["deviceId"] = $"device-{i}";
+        dict["timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        for (int m = 0; m < noOfMetrics; m++)
+            dict[$"numeric_{i}_{m}"] = Random.Shared.NextDouble();
+        var messagePayload = JsonSerializer.SerializeToUtf8Bytes(dict);
+        var topic = string.Format(topicFormat, i, i);
+        var path = $"/ps/{topic}";
 
-        var clientResponse = client.Post(serializedPayload);
-        Console.WriteLine($"Sent topic:{topic}");
-        Console.WriteLine($"Sent payload: {serializedPayload} \nStatus code: {clientResponse.CodeString}");
-        Thread.Sleep(delayInMilliseconds);
+        var request = new CoapRequestBuilder()
+            .WithMethod(CoapRequestMethod.Post)
+            .WithPath(path)
+            .WithQuery(new[] { $"qos={qos}" })
+            .WithPayload(messagePayload)
+            .Build();
+        var response = await coapClient.RequestAsync(request, cancellationToken);
+        await Task.Delay(interval, cancellationToken);
     }
-}
+});
 
-static object GetPayload(
-    int messageId,
-    double currentTemperature,
-    double currentHumidity,
-    int random,
-    string deviceId = "device")
-{
-    var payload = new
-    {
-        messageId = messageId++,
-        temperature = currentTemperature,
-        humidity = currentHumidity,
-        deviceId = deviceId,
-        timestamp = ConvertToUnixTimestamp(),
-        ack = (random % 2) == 0 ? false : true,
-        snr = random,
-        txt = random.ToString() + "txt",
-        intValue = random
-    };
-
-    return payload;
-}
-
-static long ConvertToUnixTimestamp() => DateTimeOffset.Now.ToUnixTimeMilliseconds();
+while (!cancellationToken.IsCancellationRequested)
+    await Task.Delay(1000);
