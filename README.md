@@ -11,7 +11,7 @@
 ```
 + Use CoAP publisher
 ```sh
-./EmqxLearning.CoapPublisher -n=5000 -I=980 -q=1 -m=10
+./EmqxLearning.CoapPublisher -n=3 -I=5 -q=1 -m=10
 ```
 + To start benchmark test using `emqtt-bench`, access the interactive shell of `emqtt-bench` container, then execute below command:
 ```sh

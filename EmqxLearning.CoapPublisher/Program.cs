@@ -42,7 +42,7 @@ Parallel.ForEach(clients, async (coapClient, _, i) =>
     while (!cancellationToken.IsCancellationRequested)
     {
         var dict = new Dictionary<string, object>();
-        dict["deviceId"] = $"device-{i}";
+        dict["deviceId"] = $"device-coap-{i}";
         dict["timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         for (int m = 0; m < noOfMetrics; m++)
             dict[$"numeric_{i}_{m}"] = Random.Shared.NextDouble();
