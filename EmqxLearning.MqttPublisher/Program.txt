@@ -11,9 +11,9 @@ Console.CancelKeyPress += (s, e) =>
     e.Cancel = true;
 };
 var cancellationToken = cts.Token;
-var numOfDevices = 5000;
-var interval = 980;
-var tcpServer = "localhost";
+var numOfDevices = 300;
+var interval = 200;
+var tcpServer = "4.145.120.186";
 var topicFormat = "{0}/devices/{1}/telemetry";
 var qos = MqttQualityOfServiceLevel.AtLeastOnce;
 var factory = new MqttFactory();
@@ -26,7 +26,7 @@ for (int i = 0; i < numOfDevices; i++)
     var mqttClient = factory.CreateMqttClient();
     var options = new MqttClientOptionsBuilder()
         .WithTcpServer(tcpServer)
-        .WithCredentials("broker-listener", "Fe5XPfrJdD5qAZY5JTPWJP8Jr8GXMEFx")
+        .WithCredentials("broker-listener", "3jj4PA7AbJURtnrRVkMbgLEaeE82HV")
         .Build();
     await mqttClient.ConnectAsync(options, cancellationToken);
     clients.Add(mqttClient);
