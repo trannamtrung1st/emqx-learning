@@ -88,8 +88,9 @@ public class DynamicRateLimiter : IDynamicRateLimiter
         await _semaphore.WaitAsync(cancellationToken: cancellationToken);
         try
         {
+            var prevLimit = _limit;
             _limit = limit;
-            if (limit > _limit) _availableEvent.Set();
+            if (limit > prevLimit) _availableEvent.Set();
         }
         finally { _semaphore.Release(); }
     }
