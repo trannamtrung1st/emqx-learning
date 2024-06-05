@@ -106,12 +106,11 @@ public class BatchIngestionService : IIngestionService, IDisposable
             await _connectionErrorsPipeline.ExecuteAsync(async (token) =>
             {
                 await OpenCircuit();
-                var _ = Task.Run(async () =>
-                {
-                    var reconnectAfter = _configuration.GetValue<int>("ResilienceSettings:CircuitBreakerReconnectAfter");
-                    await Task.Delay(reconnectAfter);
-                    await CloseCircuit();
-                });
+                var reconnectAfter = _configuration.GetValue<int>("ResilienceSettings:CircuitBreakerReconnectAfter");
+                var timer = new System.Timers.Timer(reconnectAfter);
+                timer.Elapsed += async (o, e) => { using (timer) { await CloseCircuit(); } };
+                timer.AutoReset = false;
+                timer.Start();
             });
             throw;
         }

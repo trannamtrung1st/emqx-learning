@@ -93,26 +93,32 @@ public class Worker : BackgroundService
         var processingTasks = new List<Task>();
         foreach (var wrapper in _mqttClients)
         {
-            var task = Task.Run(async () =>
+            var tcs = new TaskCompletionSource();
+            _ = Task.Factory.StartNew(async () =>
             {
-                bool completed = false;
-                do
+                try
                 {
-                    var hasMessageIncoming = DateTime.UtcNow.AddSeconds(-checkLastMessageRangeInSecs) <= wrapper.LastMessageTime;
-                    completed = !hasMessageIncoming && wrapper.BatchCount == 0 && wrapper.BatchId == null && !wrapper.LastBatchFlushing;
-                    _logger.LogDebug("Client: {Id} - Incoming: {Incoming} - BatchCount: {BatchCount} - BatchId: {BatchId} - Flushing: {Flushing}",
-                        wrapper.ChannelId, hasMessageIncoming, wrapper.BatchCount, wrapper.BatchId, wrapper.LastBatchFlushing);
-                    if (!completed) await Task.Delay(1000);
-                } while (!completed);
+                    bool completed = false;
+                    do
+                    {
+                        var hasMessageIncoming = DateTime.UtcNow.AddSeconds(-checkLastMessageRangeInSecs) <= wrapper.LastMessageTime;
+                        completed = !hasMessageIncoming && wrapper.BatchCount == 0 && wrapper.BatchId == null && !wrapper.LastBatchFlushing;
+                        _logger.LogDebug("Client: {Id} - Incoming: {Incoming} - BatchCount: {BatchCount} - BatchId: {BatchId} - Flushing: {Flushing}",
+                            wrapper.ChannelId, hasMessageIncoming, wrapper.BatchCount, wrapper.BatchId, wrapper.LastBatchFlushing);
+                        if (!completed) await Task.Delay(1000);
+                    } while (!completed);
 
-                await wrapper.Client.InternalClient.DisconnectAsync(new MqttClientDisconnectOptions
-                {
-                    SessionExpiryInterval = 1,
-                    Reason = MqttClientDisconnectOptionsReason.AdministrativeAction
-                });
-                await wrapper.Client.StopAsync();
-            }, cancellationToken);
-            processingTasks.Add(task);
+                    await wrapper.Client.InternalClient.DisconnectAsync(new MqttClientDisconnectOptions
+                    {
+                        SessionExpiryInterval = 1,
+                        Reason = MqttClientDisconnectOptionsReason.AdministrativeAction
+                    });
+                    await wrapper.Client.StopAsync();
+                    tcs.SetResult();
+                }
+                catch (Exception ex) { tcs.SetException(ex); }
+            }, creationOptions: TaskCreationOptions.LongRunning);
+            processingTasks.Add(tcs.Task);
         }
 
         await Task.WhenAll(processingTasks);
