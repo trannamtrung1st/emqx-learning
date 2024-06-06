@@ -128,11 +128,20 @@ public class Worker : BackgroundService
 
     private void SetupCancellationTokens()
     {
-        _stoppingToken.Register(() => _circuitTokenSource.Cancel());
-        _circuitTokenSource.Token.Register(() =>
+        CancellationTokenRegistration stoppingReg = default;
+        stoppingReg = _stoppingToken.Register(() =>
         {
-            foreach (var wrapper in _mqttClients)
-                wrapper.TokenSource.TryCancel();
+            using (stoppingReg) { _circuitTokenSource.Cancel(); }
+        });
+
+        CancellationTokenRegistration circuitReg = default;
+        circuitReg = _circuitTokenSource.Token.Register(() =>
+        {
+            using (circuitReg)
+            {
+                foreach (var wrapper in _mqttClients)
+                    wrapper.TokenSource.TryCancel();
+            }
         });
     }
 
@@ -683,6 +692,10 @@ internal class MqttClientWrapper
         _tokenSource?.Dispose();
         if (_stoppingToken.IsCancellationRequested) return;
         _tokenSource = new CancellationTokenSource();
-        _tokenSource.Token.Register(() => ResetTokenSource());
+        CancellationTokenRegistration reg = default;
+        reg = _tokenSource.Token.Register(() =>
+        {
+            using (reg) { ResetTokenSource(); }
+        });
     }
 }
