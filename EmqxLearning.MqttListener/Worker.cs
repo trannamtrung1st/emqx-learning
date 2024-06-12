@@ -332,7 +332,7 @@ public class Worker : BackgroundService
         {
             wrapper.LastMessageTime = DateTime.UtcNow;
             e.AutoAcknowledge = false;
-            await _dynamicRateLimiter.Acquire(cancellationToken: wrapper.TokenSource.Token);
+            var scope = await _dynamicRateLimiter.Acquire(cancellationToken: wrapper.TokenSource.Token);
             var _ = Task.Run(async () =>
             {
                 try
@@ -348,7 +348,7 @@ public class Worker : BackgroundService
                     var _ = Task.Run(HandleOpenCircuit);
                 }
                 catch (Exception ex) { _logger.LogError(ex, ex.Message); }
-                finally { await _dynamicRateLimiter.Release(); }
+                finally { await scope.DisposeAsync(); }
             });
             await Task.Delay(_configuration.GetValue<int>("AppSettings:ReceiveDelay"));
         }

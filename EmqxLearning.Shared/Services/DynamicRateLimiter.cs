@@ -1,4 +1,5 @@
 using EmqxLearning.Shared.Services.Abstracts;
+using EmqxLearning.Shared.Utils;
 
 namespace EmqxLearning.Shared.Services;
 
@@ -30,7 +31,7 @@ public class DynamicRateLimiter : IDynamicRateLimiter
         _availableEvent = new ManualResetEventSlim();
     }
 
-    public async Task Acquire(CancellationToken cancellationToken = default)
+    public async Task<IAsyncDisposable> Acquire(CancellationToken cancellationToken = default)
     {
         bool queued = false;
         bool canAcquired = false;
@@ -61,6 +62,7 @@ public class DynamicRateLimiter : IDynamicRateLimiter
                 if (!canAcquired)
                     _availableEvent.Wait(cancellationToken);
             }
+            return new SimpleAsyncScope(() => Release(cancellationToken));
         }
         catch
         {
@@ -69,7 +71,7 @@ public class DynamicRateLimiter : IDynamicRateLimiter
         }
     }
 
-    public async Task Release(CancellationToken cancellationToken = default)
+    private async Task Release(CancellationToken cancellationToken = default)
     {
         await _semaphore.WaitAsync(cancellationToken: cancellationToken);
         try
