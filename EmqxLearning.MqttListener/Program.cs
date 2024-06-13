@@ -5,8 +5,8 @@ using Polly.Registry;
 using RabbitMQ.Client;
 using Constants = EmqxLearning.MqttListener.Constants;
 
-int maxThreads = Environment.ProcessorCount * 2;
-ThreadPool.SetMinThreads(workerThreads: maxThreads, completionPortThreads: maxThreads);
+int minThreads = 512;
+ThreadPool.SetMinThreads(workerThreads: minThreads, completionPortThreads: minThreads);
 
 IHost host = Host.CreateDefaultBuilder(args)
     .ConfigureServices((context, services) =>
