@@ -15,24 +15,24 @@ public class FuzzyThreadController : IFuzzyThreadController
         var cVeryLow = cpu.MembershipFunctions.AddTrapezoid("VeryLow", 0, 0, 0.2, 0.4);
         var cLow = cpu.MembershipFunctions.AddTrapezoid("Low", 0, 0.2, 0.4, 0.6);
         var cMedium = cpu.MembershipFunctions.AddTrapezoid("Medium", 0.2, 0.4, 0.6, 0.8);
-        var cHigh = cpu.MembershipFunctions.AddTrapezoid("High", 0.4, 0.8, 1, 1);
-        var cVeryHigh = cpu.MembershipFunctions.AddTrapezoid("VeryHigh", 0.8, 1, 1, 1);
+        var cHigh = cpu.MembershipFunctions.AddTrapezoid("High", 0.4, 0.6, 0.8, 1);
+        var cVeryHigh = cpu.MembershipFunctions.AddTrapezoid("VeryHigh", 0.6, 0.8, 1, 1);
         var cpuRules = new[] { cVeryLow, cLow, cMedium, cHigh, cVeryHigh };
 
         var mem = new LinguisticVariable("Memory");
         var mVeryLow = mem.MembershipFunctions.AddTrapezoid("VeryLow", 0, 0, 0.2, 0.4);
         var mLow = mem.MembershipFunctions.AddTrapezoid("Low", 0, 0.2, 0.4, 0.6);
         var mMedium = mem.MembershipFunctions.AddTrapezoid("Medium", 0.2, 0.4, 0.6, 0.8);
-        var mHigh = mem.MembershipFunctions.AddTrapezoid("High", 0.4, 0.8, 1, 1);
-        var mVeryHigh = mem.MembershipFunctions.AddTrapezoid("VeryHigh", 0.8, 1, 1, 1);
+        var mHigh = mem.MembershipFunctions.AddTrapezoid("High", 0.4, 0.6, 0.8, 1);
+        var mVeryHigh = mem.MembershipFunctions.AddTrapezoid("VeryHigh", 0.6, 0.8, 1, 1);
         var memRules = new[] { mVeryLow, mLow, mMedium, mHigh, mVeryHigh };
 
         var overall = new LinguisticVariable("Overall");
         var oVeryLow = overall.MembershipFunctions.AddTrapezoid("VeryLow", 0, 0, 0.2, 0.4);
         var oLow = overall.MembershipFunctions.AddTrapezoid("Low", 0, 0.2, 0.4, 0.6);
         var oMedium = overall.MembershipFunctions.AddTrapezoid("Medium", 0.2, 0.4, 0.6, 0.8);
-        var oHigh = overall.MembershipFunctions.AddTrapezoid("High", 0.4, 0.8, 1, 1);
-        var oVeryHigh = overall.MembershipFunctions.AddTrapezoid("VeryHigh", 0.8, 1, 1, 1);
+        var oHigh = overall.MembershipFunctions.AddTrapezoid("High", 0.4, 0.6, 0.8, 1);
+        var oVeryHigh = overall.MembershipFunctions.AddTrapezoid("VeryHigh", 0.6, 0.8, 1, 1);
 
         FLS.MembershipFunctions.IMembershipFunction[][] ruleMatrix = new[] {
             new[] { oVeryLow, oLow, oMedium, oHigh, oVeryHigh },
