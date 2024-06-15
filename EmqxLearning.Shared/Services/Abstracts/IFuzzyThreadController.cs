@@ -2,5 +2,5 @@ namespace EmqxLearning.Shared.Services.Abstracts;
 
 public interface IFuzzyThreadController
 {
-    int GetThreadScale(double cpu, double memory, int factor = 10);
+    int GetThreadScale(double cpu, double memory, double ideal, int factor = 10);
 }

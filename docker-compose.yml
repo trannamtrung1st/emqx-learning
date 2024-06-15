@@ -26,6 +26,7 @@ services:
       AppSettings__ScaleFactor: 50
       AppSettings__ScaleCheckInterval: 5000
       AppSettings__CheckDuplicates: true
+      AppSettings__IdealUsage: 0.75
       RabbitMqClient__HostName: rabbitmq1
       RabbitMqChannel__PublisherConfirmBatchSize: 64
     networks:

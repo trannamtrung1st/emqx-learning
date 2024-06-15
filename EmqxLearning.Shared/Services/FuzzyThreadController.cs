@@ -6,7 +6,6 @@ namespace EmqxLearning.Shared.Services;
 
 public class FuzzyThreadController : IFuzzyThreadController
 {
-    public const double DefaultIdealUsage = 0.6;
     private readonly IFuzzyEngine _fuzzyEngine;
 
     public FuzzyThreadController()
@@ -28,19 +27,19 @@ public class FuzzyThreadController : IFuzzyThreadController
         var mVeryHigh = mem.MembershipFunctions.AddTrapezoid("VeryHigh", 0.8, 1, 1, 1);
         var memRules = new[] { mVeryLow, mLow, mMedium, mHigh, mVeryHigh };
 
-        var change = new LinguisticVariable("Change");
-        var chIncFast = change.MembershipFunctions.AddTrapezoid("IncFast", 0, 0, 0.2, 0.4);
-        var chIncNormal = change.MembershipFunctions.AddTrapezoid("IncNormal", 0.2, 0.4, 0.6, 0.8);
-        var chNoChange = change.MembershipFunctions.AddTrapezoid("NoChange", 0.7, 0.75, 0.85, 0.9);
-        var chDecNormal = change.MembershipFunctions.AddTrapezoid("DecNormal", 0.8, 0.85, 0.9, 0.95);
-        var chDecFast = change.MembershipFunctions.AddTrapezoid("DecFast", 0.9, 0.95, 1, 1);
+        var overall = new LinguisticVariable("Overall");
+        var oVeryLow = overall.MembershipFunctions.AddTrapezoid("VeryLow", 0, 0, 0.2, 0.4);
+        var oLow = overall.MembershipFunctions.AddTrapezoid("Low", 0, 0.2, 0.4, 0.6);
+        var oMedium = overall.MembershipFunctions.AddTrapezoid("Medium", 0.2, 0.4, 0.6, 0.8);
+        var oHigh = overall.MembershipFunctions.AddTrapezoid("High", 0.4, 0.8, 1, 1);
+        var oVeryHigh = overall.MembershipFunctions.AddTrapezoid("VeryHigh", 0.8, 1, 1, 1);
 
         FLS.MembershipFunctions.IMembershipFunction[][] ruleMatrix = new[] {
-            new[] { chIncFast, chIncFast, chIncNormal, chNoChange, chDecFast },
-            new[] { chIncFast, chIncFast, chIncNormal, chNoChange, chDecFast },
-            new[] { chIncNormal, chIncNormal, chIncNormal, chNoChange, chDecFast },
-            new[] { chNoChange, chNoChange, chNoChange, chDecNormal, chDecFast },
-            new[] { chDecFast, chDecFast, chDecFast, chDecFast, chDecFast },
+            new[] { oVeryLow, oLow, oMedium, oHigh, oVeryHigh },
+            new[] { oLow, oLow, oMedium, oHigh, oVeryHigh },
+            new[] { oMedium, oMedium, oMedium, oHigh, oVeryHigh },
+            new[] { oHigh, oHigh, oHigh, oHigh, oVeryHigh },
+            new[] { oVeryHigh, oVeryHigh, oVeryHigh, oVeryHigh, oVeryHigh },
         };
 
         _fuzzyEngine = new FuzzyEngineFactory().Default();
@@ -52,14 +51,14 @@ public class FuzzyThreadController : IFuzzyThreadController
                 _fuzzyEngine.Rules.Add(Rule.If(
                     cpu.Is(cpuRules[i])
                     .And(mem.Is(memRules[j])))
-                    .Then(change.Is(ruleMatrix[i][j])));
+                    .Then(overall.Is(ruleMatrix[i][j])));
             }
         }
     }
 
-    public int GetThreadScale(double cpu, double memory, int factor = 10)
+    public int GetThreadScale(double cpu, double memory, double ideal, int factor = 10)
     {
-        var threadScale = (int)Math.Round((DefaultIdealUsage - _fuzzyEngine.Defuzzify(new
+        var threadScale = (int)Math.Round((ideal - _fuzzyEngine.Defuzzify(new
         {
             Cpu = cpu > 1 ? 1 : cpu,
             Memory = memory > 1 ? 1 : memory

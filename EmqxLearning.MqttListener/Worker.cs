@@ -154,11 +154,12 @@ public class Worker : BackgroundService
             var initialConcurrencyLimit = _configuration.GetValue<int>("AppSettings:InitialConcurrencyLimit");
             var acceptedQueueCount = _configuration.GetValue<int>("AppSettings:AcceptedQueueCount");
             var acceptedAvailableConcurrency = _configuration.GetValue<int>("AppSettings:AcceptedAvailableConcurrency");
+            var idealUsage = _configuration.GetValue<double>("AppSettings:IdealUsage");
             _resourceMonitor.SetMonitor(async (cpu, mem) =>
             {
                 try
                 {
-                    await ScaleConcurrency(cpu, mem, scaleFactor, initialConcurrencyLimit, acceptedQueueCount, acceptedAvailableConcurrency);
+                    await ScaleConcurrency(cpu, mem, ideal: idealUsage, scaleFactor, initialConcurrencyLimit, acceptedQueueCount, acceptedAvailableConcurrency);
                 }
                 catch (Exception ex)
                 {
@@ -169,9 +170,9 @@ public class Worker : BackgroundService
         _resourceMonitor.Start();
     }
 
-    private async Task ScaleConcurrency(double cpu, double mem, int scaleFactor, int initialConcurrencyLimit, int acceptedQueueCount, int acceptedAvailableConcurrency)
+    private async Task ScaleConcurrency(double cpu, double mem, double ideal, int scaleFactor, int initialConcurrencyLimit, int acceptedQueueCount, int acceptedAvailableConcurrency)
     {
-        var threadScale = _fuzzyThreadController.GetThreadScale(cpu, mem, factor: scaleFactor);
+        var threadScale = _fuzzyThreadController.GetThreadScale(cpu, mem, ideal, factor: scaleFactor);
         if (threadScale == 0) return;
         var (queueCountAvg, availableCountAvg) = await GetConcurrencyStatistics();
         var (concurrencyLimit, _, _, _) = _dynamicRateLimiter.State;
