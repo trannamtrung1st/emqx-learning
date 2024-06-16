@@ -576,8 +576,6 @@ public class Worker : BackgroundService
 
         foreach (var wrapper in _mqttClients)
         {
-            var channel = _rabbitMqConnectionManager.GetChannel(wrapper.ChannelId);
-
             await _connectionErrorsPipeline.ExecuteAsync(async (token) =>
                 await wrapper.Client.StartAsync(wrapper.ManagedOptions),
                 cancellationToken: _stoppingToken);
@@ -598,13 +596,13 @@ public class Worker : BackgroundService
 
     private Action<IModel> SetupRabbitMqChannel(string channelId)
     {
-        Action<IModel> configureChannel = (channel) =>
+        void ConfigureChannel(IModel channel)
         {
             channel.ContinuationTimeout = _configuration.GetValue<TimeSpan?>("RabbitMqChannel:ContinuationTimeout") ?? channel.ContinuationTimeout;
             channel.ModelShutdown += (sender, e) => OnModelShutdown(sender, e, channelId);
             channel.ConfirmSelect();
-        };
-        return configureChannel;
+        }
+        return ConfigureChannel;
     }
 
     private void OnModelShutdown(object sender, ShutdownEventArgs e, string channelId)
