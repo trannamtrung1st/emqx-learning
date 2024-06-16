@@ -72,7 +72,7 @@ public class Worker : BackgroundService
 
     private Action<IModel> SetupRabbitMqChannel(string channelId)
     {
-        Action<IModel> configureChannel = (channel) =>
+        void ConfigureChannel(IModel channel)
         {
             var rabbitMqChannelOptions = _configuration.GetSection("RabbitMqChannel");
             channel.BasicQos(
@@ -81,8 +81,8 @@ public class Worker : BackgroundService
                 global: false);
             channel.ContinuationTimeout = _configuration.GetValue<TimeSpan?>("RabbitMqChannel:ContinuationTimeout") ?? channel.ContinuationTimeout;
             channel.ModelShutdown += (sender, e) => OnModelShutdown(sender, e, channelId);
-        };
-        return configureChannel;
+        }
+        return ConfigureChannel;
     }
 
     private void OnModelShutdown(object sender, ShutdownEventArgs e, string channelId)

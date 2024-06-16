@@ -72,11 +72,11 @@ void SetupRabbitMq(IServiceCollection services, IConfiguration configuration)
 Action<IConnection> SetupRabbitMqConnection(IServiceProvider provider)
 {
     var logger = provider.GetRequiredService<ILogger<Worker>>();
-    Action<IConnection> configureConnection = (connection) =>
+    void ConfigureConnection(IConnection connection)
     {
         connection.ConnectionShutdown += (sender, e) => OnConnectionShutdown(sender, e, logger);
-    };
-    return configureConnection;
+    }
+    return ConfigureConnection;
 }
 
 void OnConnectionShutdown(object sender, ShutdownEventArgs e, ILogger<Worker> logger)

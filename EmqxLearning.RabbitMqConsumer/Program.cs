@@ -5,9 +5,7 @@ using RabbitMQ.Client;
 using Constants = EmqxLearning.RabbitMqConsumer.Constants;
 using EmqxLearning.Shared.Extensions;
 using Polly.Registry;
-using EmqxLearning.Shared.Services.Abstracts;
 using EmqxLearning.Shared.Exceptions;
-using EmqxLearning.Shared.Helpers;
 
 IHost host = Host.CreateDefaultBuilder(args)
     .ConfigureServices((context, services) =>
@@ -72,15 +70,15 @@ void SetupRabbitMq(IServiceCollection services, IConfiguration configuration)
 
 Action<IConnection> SetupRabbitMqConnection(IServiceProvider provider)
 {
-    var logger = provider.GetRequiredService<ILogger<Worker>>();
-    Action<IConnection> configureConnection = (connection) =>
+    var logger = provider.GetRequiredService<ILogger<Program>>();
+    void ConfigureConnection(IConnection connection)
     {
         connection.ConnectionShutdown += (sender, e) => OnConnectionShutdown(sender, e, logger);
-    };
-    return configureConnection;
+    }
+    return ConfigureConnection;
 }
 
-void OnConnectionShutdown(object sender, ShutdownEventArgs e, ILogger<Worker> logger)
+void OnConnectionShutdown(object sender, ShutdownEventArgs e, ILogger logger)
 {
     if (e.Exception != null)
         logger.LogError(e.Exception, "RabbitMQ connection shutdown reason: {Reason} | Message: {Message}", e.Cause, e.Exception?.Message);
