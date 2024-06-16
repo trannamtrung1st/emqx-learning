@@ -43,16 +43,16 @@ public class RabbitMqConnectionManager : IRabbitMqConnectionManager, IDisposable
         }
         catch
         {
-            DisposeChannel();
-            DisposeConnection();
+            DisposeChannels();
+            DisposeConnections();
             throw;
         }
     }
 
     public void Close()
     {
-        DisposeChannel();
-        DisposeConnection();
+        DisposeChannels();
+        DisposeConnections();
     }
 
     private void CreateNewConnection()
@@ -79,11 +79,11 @@ public class RabbitMqConnectionManager : IRabbitMqConnectionManager, IDisposable
 
     public void Dispose()
     {
-        DisposeChannel();
-        DisposeConnection();
+        DisposeChannels();
+        DisposeConnections();
     }
 
-    private void DisposeChannel()
+    private void DisposeChannels()
     {
         _channels.Values.ForEach(ch =>
         {
@@ -95,7 +95,7 @@ public class RabbitMqConnectionManager : IRabbitMqConnectionManager, IDisposable
         });
     }
 
-    private void DisposeConnection()
+    private void DisposeConnections()
     {
         if (_currentConnection?.IsOpen == true)
         {
