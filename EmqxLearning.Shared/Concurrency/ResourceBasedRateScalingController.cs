@@ -76,7 +76,7 @@ public class ResourceBasedRateScalingController : IRateScalingController, IDispo
         if (rateScale < 0)
             newLimit = rateLimit + rateScale;
         else if (availableCountAvg > parameters.AcceptedAvailablePercentage * rateLimit && queueCountAvg <= parameters.AcceptedQueueCount)
-            newLimit = rateLimit - rateScale / 2;
+            newLimit = rateLimit - availableCountAvg / 2;
         else
             newLimit = rateLimit + rateScale;
         if (newLimit < rateLimiter.InitialLimit) newLimit = rateLimiter.InitialLimit;
