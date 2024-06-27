@@ -107,7 +107,7 @@ public class Worker : BackgroundService
                     await wrapper.Client.InternalClient.DisconnectAsync(new MqttClientDisconnectOptions
                     {
                         SessionExpiryInterval = 1,
-                        Reason = MqttClientDisconnectOptionsReason.AdministrativeAction
+                        Reason = MqttClientDisconnectOptionsReason.NormalDisconnection
                     });
                     await wrapper.Client.StopAsync();
                     tcs.SetResult();
