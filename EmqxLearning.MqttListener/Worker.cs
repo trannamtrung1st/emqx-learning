@@ -256,7 +256,12 @@ public class Worker : BackgroundService
         {
             wrapper.FlushBatchTimer.Stop();
             wrapper.TokenSource.TryCancel();
-            await wrapper.SafeAccessBatch((batch) => batch.Clear());
+            await wrapper.SafeAccessBatch((batch) =>
+            {
+                batch.Clear();
+                wrapper.BatchId = null;
+                wrapper.LastBatchFlushing = false;
+            });
             await wrapper.Client.StopAsync();
         }
     }
