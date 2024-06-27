@@ -1,5 +1,4 @@
-
-namespace EmqxLearning.Shared.Utils;
+namespace EmqxLearning.Shared.Concurrency;
 
 public sealed class SimpleScope : IDisposable
 {
@@ -12,6 +11,15 @@ public sealed class SimpleScope : IDisposable
     public SimpleScope(Action onDispose)
     {
         _onDispose = onDispose;
+    }
+
+    public SimpleScope(params IDisposable[] disposables)
+    {
+        _onDispose = () =>
+        {
+            foreach (var disposable in disposables)
+                try { disposable?.Dispose(); } catch { }
+        };
     }
 
     public void Dispose() => _onDispose?.Invoke();

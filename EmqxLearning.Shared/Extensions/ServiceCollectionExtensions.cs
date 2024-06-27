@@ -6,7 +6,7 @@ using StackExchange.Redis;
 
 namespace EmqxLearning.Shared.Extensions;
 
-public static class ServiceCollectionExtensions
+public static partial class ServiceCollectionExtensions
 {
     public static IServiceCollection AddRabbitMqConnectionManager(this IServiceCollection services,
         ConnectionFactory connectionFactory,
@@ -30,21 +30,5 @@ public static class ServiceCollectionExtensions
                 var multiplexer = provider.GetRequiredService<ConnectionMultiplexer>();
                 return multiplexer;
             });
-    }
-
-
-    public static IServiceCollection AddFuzzyThreadController(this IServiceCollection services)
-    {
-        return services.AddSingleton<IFuzzyThreadController, FuzzyThreadController>();
-    }
-
-    public static IServiceCollection AddResourceMonitor(this IServiceCollection services)
-    {
-        return services.AddSingleton<IResourceMonitor, ResourceMonitor>();
-    }
-
-    public static IServiceCollection AddDynamicRateLimiter(this IServiceCollection services)
-    {
-        return services.AddSingleton<IDynamicRateLimiter, DynamicRateLimiter>();
     }
 }

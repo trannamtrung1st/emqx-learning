@@ -1,14 +1,14 @@
-using EmqxLearning.Shared.Services.Abstracts;
 using FLS;
 using FLS.Rules;
+using EmqxLearning.Shared.Concurrency.Abstracts;
 
-namespace EmqxLearning.Shared.Services;
+namespace EmqxLearning.Shared.Concurrency;
 
-public class FuzzyThreadController : IFuzzyThreadController
+public class ResourceBasedFuzzyRateScaler : IResourceBasedFuzzyRateScaler
 {
     private readonly IFuzzyEngine _fuzzyEngine;
 
-    public FuzzyThreadController()
+    public ResourceBasedFuzzyRateScaler()
     {
 
         var cpu = new LinguisticVariable("Cpu");
@@ -35,11 +35,11 @@ public class FuzzyThreadController : IFuzzyThreadController
         var oVeryHigh = overall.MembershipFunctions.AddTrapezoid("VeryHigh", 0.6, 0.8, 1, 1);
 
         FLS.MembershipFunctions.IMembershipFunction[][] ruleMatrix = new[] {
-            new[] { oVeryLow, oLow, oMedium, oHigh, oVeryHigh },
-            new[] { oLow, oLow, oMedium, oHigh, oVeryHigh },
-            new[] { oMedium, oMedium, oMedium, oHigh, oVeryHigh },
-            new[] { oHigh, oHigh, oHigh, oHigh, oVeryHigh },
-            new[] { oVeryHigh, oVeryHigh, oVeryHigh, oVeryHigh, oVeryHigh },
+            new[] { oVeryLow,   oLow,       oLow,       oMedium,    oVeryHigh },
+            new[] { oLow,       oLow,       oLow,       oMedium,    oVeryHigh },
+            new[] { oMedium,    oMedium,    oMedium,    oMedium,    oVeryHigh },
+            new[] { oHigh,      oHigh,      oHigh,      oHigh,      oVeryHigh },
+            new[] { oVeryHigh,  oVeryHigh,  oVeryHigh,  oVeryHigh,  oVeryHigh },
         };
 
         _fuzzyEngine = new FuzzyEngineFactory().Default();
@@ -56,13 +56,16 @@ public class FuzzyThreadController : IFuzzyThreadController
         }
     }
 
-    public int GetThreadScale(double cpu, double memory, double ideal, int factor = 10)
+    public int GetRateScale(double cpu, double memory, double ideal, int factor = 10, double incFactor = 1, double decFactor = 3)
     {
-        var threadScale = (int)Math.Round((ideal - _fuzzyEngine.Defuzzify(new
+        var fuzzyOutput = _fuzzyEngine.Defuzzify(new
         {
             Cpu = cpu > 1 ? 1 : cpu,
             Memory = memory > 1 ? 1 : memory
-        })) * factor);
-        return threadScale;
+        });
+        var rateScale = (int)Math.Round((ideal - fuzzyOutput) * factor);
+        if (rateScale > 0) rateScale = (int)(rateScale * incFactor);
+        else if (rateScale < 0) rateScale = (int)(rateScale * decFactor);
+        return rateScale;
     }
 }

@@ -1,7 +1,9 @@
-namespace EmqxLearning.Shared.Services.Abstracts;
+namespace EmqxLearning.Shared.Diagnostic.Abstracts;
 
 public interface IResourceMonitor
 {
+    double TotalCores { get; }
+
     void Start();
     void Stop();
     double GetCpuUsage();

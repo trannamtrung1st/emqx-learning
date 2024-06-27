@@ -11,10 +11,19 @@ ThreadPool.SetMinThreads(workerThreads: minThreads, completionPortThreads: minTh
 IHost host = Host.CreateDefaultBuilder(args)
     .ConfigureServices((context, services) =>
     {
+        var rateScalingConfig = context.Configuration.GetSection("RateScaling");
+        var taskLimiterConfig = context.Configuration.GetSection("TaskLimiter");
+        var sizeLimiterConfig = context.Configuration.GetSection("SizeLimiter");
+
         services.AddHostedService<Worker>();
         services.AddResourceMonitor()
-            .AddFuzzyThreadController()
-            .AddDynamicRateLimiter()
+            .AddResourceBasedFuzzyRateScaler()
+            .AddResourceBasedRateScaling(configure: rateScalingConfig.Bind)
+            .AddConsumerRateLimiters(
+                configureTaskLimiter: taskLimiterConfig.Bind,
+                configureSizeLimiter: sizeLimiterConfig.Bind
+            )
+            .AddSyncAsyncTaskRunner()
             .AddRedis(connStr: context.Configuration.GetConnectionString("Redis"));
 
         SetupRabbitMq(services, context.Configuration);
@@ -51,7 +60,10 @@ IServiceCollection SetupResilience(IServiceCollection services, IConfiguration r
             builder.AddDefaultRetry(
                 retryAttempts: resilienceSettings.GetValue<int>($"{TransientErrorsKey}:RetryAttempts"),
                 delaySecs: resilienceSettings.GetValue<int>($"{TransientErrorsKey}:DelaySecs"),
-                shouldHandle: (ex) => new ValueTask<bool>(ex.Outcome.Exception != null && ex.Outcome.Exception is not CircuitOpenException)
+                shouldHandle: (ex) => new ValueTask<bool>(
+                    ex.Outcome.Exception != null
+                    && ex.Outcome.Exception is not CircuitOpenException
+                    && ex.Outcome.Exception is not InvalidOperationException)
             );
         });
         return registry;

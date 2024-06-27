@@ -1,15 +1,14 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using EmqxLearning.Shared.Services.Abstracts;
+using EmqxLearning.Shared.Diagnostic.Abstracts;
 
-namespace EmqxLearning.Shared.Services;
+namespace EmqxLearning.Shared.Diagnostic;
 
 public class ResourceMonitor : IResourceMonitor
 {
     private System.Timers.Timer _currentTimer;
     private DateTime _lastCpuTime;
     private long _lastCpuUsage;
-    private double _totalCores;
 
     public ResourceMonitor()
     {
@@ -17,11 +16,14 @@ public class ResourceMonitor : IResourceMonitor
         if (IsLinux)
         {
             _lastCpuUsage = IsLinux ? GetCpuUsageMs() : default;
-            _totalCores = GetTotalCores();
+            TotalCores = GetTotalCores();
         }
+        else
+            TotalCores = Environment.ProcessorCount;
     }
 
-    public bool IsLinux => RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
+    public double TotalCores { get; }
+    public static bool IsLinux => RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
 
     public double GetTotalCores()
     {
@@ -35,7 +37,7 @@ public class ResourceMonitor : IResourceMonitor
     {
         var currentTime = DateTime.UtcNow;
         var currentUsageMs = GetCpuUsageMs();
-        var totalTimeMs = (currentTime - _lastCpuTime).TotalMilliseconds * _totalCores;
+        var totalTimeMs = (currentTime - _lastCpuTime).TotalMilliseconds * TotalCores;
         var cpuUtil = (currentUsageMs - _lastCpuUsage) / totalTimeMs;
         _lastCpuTime = currentTime;
         _lastCpuUsage = currentUsageMs;
@@ -58,7 +60,7 @@ public class ResourceMonitor : IResourceMonitor
         return used / total;
     }
 
-    public void SetMonitor(Func<double, double, Task> monitorCallback, double interval = 10000)
+    public void SetMonitor(Func<double, double, Task> monitorCallback, double interval = 5000)
     {
         if (!IsLinux)
             return;

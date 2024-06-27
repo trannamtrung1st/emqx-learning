@@ -3,7 +3,7 @@
 ## Performance test
 + To start benchmark test using `mqtt-publisher`, access the interactive shell of `mqtt-publisher` container, then execute below command:
 ```sh
-./EmqxLearning.MqttPublisher -n=5000 -I=980 -q=1 -m=10
+./EmqxLearning.MqttPublisher -n=5000 -I=980 -q=1 -m=7
 ```
 + Large payload, e.g, 100 metrics
 ```sh

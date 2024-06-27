@@ -10,9 +10,11 @@ services:
       context: .
       dockerfile: EmqxLearning.MqttListener/Dockerfile
     environment:
-      Logging__LogLevel__Default: Warning
+      Logging__LogLevel__Default: Information
       ConnectionStrings__Redis: redis1:6379,allowAdmin=true,syncTimeout=10000,asyncTimeout=10000
-      MqttClientOptions__TcpServer: node1.emqx.io
+      MqttClientOptions__Tcp__Server: node1.emqx.io
+      MqttClientOptions__Tcp__NoDelay: true
+      MqttClientOptions__Tcp__BufferSize: 40960
       MqttClientOptions__CleanSession: false
       MqttClientOptions__SessionExpiryInterval: 120
       MqttClientOptions__ReconnectDelaySecs: 15
@@ -20,13 +22,18 @@ services:
       MqttClientOptions__Qos: 1
       AppSettings__ReceiveDelay: 0
       AppSettings__ProcessingTime: 20
-      AppSettings__InitialConcurrencyLimit: 8
       AppSettings__NumberOfConnections: 20
       AppSettings__BackgroundProcessing: true
-      AppSettings__ScaleFactor: 50
-      AppSettings__ScaleCheckInterval: 5000
       AppSettings__CheckDuplicates: true
-      AppSettings__IdealUsage: 0.75
+
+      TaskLimiter__InitialLimit: 8
+      RateScaling__Parameters__TaskLimiter__ScaleFactor: 50
+      RateScaling__Parameters__TaskLimiter__IdealUsage: 0.75
+
+      SizeLimiter__InitialLimit: 4000
+      RateScaling__Parameters__SizeLimiter__ScaleFactor: 50000
+      RateScaling__Parameters__SizeLimiter__IdealUsage: 0.75
+
       RabbitMqClient__HostName: rabbitmq1
       RabbitMqChannel__PublisherConfirmBatchSize: 64
     networks:
@@ -68,25 +75,25 @@ services:
         condition: service_healthy
 
   # CoAP publishers
-  coap-publisher-1:
-    image: emqx-learning/coap-publisher:latest
-    build:
-      context: .
-      dockerfile: EmqxLearning.CoapPublisher/Dockerfile
-    environment:
-      - CoapClientOptions__CoapServer=node1.emqx.io
-      - CoapClientOptions__TopicFormat=projectId/{0}/devices/{1}/telemetry
-    stdin_open: true
-    tty: true
-    networks:
-      - emqx-bridge
-    deploy:
-      replicas: 1
-    depends_on:
-      emqx1:
-        condition: service_healthy
-      rabbitmq1:
-        condition: service_healthy
+  # coap-publisher-1:
+  #   image: emqx-learning/coap-publisher:latest
+  #   build:
+  #     context: .
+  #     dockerfile: EmqxLearning.CoapPublisher/Dockerfile
+  #   environment:
+  #     - CoapClientOptions__CoapServer=node1.emqx.io
+  #     - CoapClientOptions__TopicFormat=projectId/{0}/devices/{1}/telemetry
+  #   stdin_open: true
+  #   tty: true
+  #   networks:
+  #     - emqx-bridge
+  #   deploy:
+  #     replicas: 1
+  #   depends_on:
+  #     emqx1:
+  #       condition: service_healthy
+  #     rabbitmq1:
+  #       condition: service_healthy
 
   # RabbitMQ consumers
   rabbitmq-consumer-1:
@@ -152,21 +159,21 @@ services:
   #       condition: service_healthy
 
   # MQTTX web
-  mqttx-web:
-    image: emqx/mqttx-web:latest
-    ports:
-      - 8888:80
-    networks:
-      - emqx-bridge
+  # mqttx-web:
+  #   image: emqx/mqttx-web:latest
+  #   ports:
+  #     - 8888:80
+  #   networks:
+  #     - emqx-bridge
 
   # libcoap
-  libcoap:
-    image: opensourcefoundries/libcoap:latest
-    stdin_open: true
-    tty: true
-    networks:
-      - emqx-bridge
-    entrypoint: ["bin/sh"]
+  # libcoap:
+  #   image: opensourcefoundries/libcoap:latest
+  #   stdin_open: true
+  #   tty: true
+  #   networks:
+  #     - emqx-bridge
+  #   entrypoint: ["bin/sh"]
 
   # EMQTT bench mark
   # emqtt-bench:
@@ -302,14 +309,14 @@ services:
       - emqx-bridge
 
   # Azure services
-  azurite:
-    image: "mcr.microsoft.com/azure-storage/azurite"
-    ports:
-      - "10000:10000"
-      - "10001:10001"
-      - "10002:10002"
-    networks:
-      - emqx-bridge
+  # azurite:
+  #   image: "mcr.microsoft.com/azure-storage/azurite"
+  #   ports:
+  #     - "10000:10000"
+  #     - "10001:10001"
+  #     - "10002:10002"
+  #   networks:
+  #     - emqx-bridge
 
 networks:
   emqx-bridge:
