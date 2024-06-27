@@ -39,7 +39,7 @@ public class Worker : BackgroundService
 
     private readonly bool _simulateLargeMemoryUsage;
     private readonly ConcurrentQueue<(DateTime Time, byte[])> _simulatedData = new();
-    private readonly System.Timers.Timer _memoryCleaner;
+    private const int DefaultSimulatedRetentionCount = 200_000;
 
     public Worker(ILogger<Worker> logger,
         IConfiguration configuration,
@@ -61,22 +61,7 @@ public class Worker : BackgroundService
         _mqttClients = new ConcurrentBag<MqttClientWrapper>();
         _connectionErrorsPipeline = resiliencePipelineProvider.GetPipeline(Constants.ResiliencePipelines.ConnectionErrors);
         _transientErrorsPipeline = resiliencePipelineProvider.GetPipeline(Constants.ResiliencePipelines.TransientErrors);
-
         _simulateLargeMemoryUsage = _configuration.GetValue<bool>("AppSettings:SimulateLargeMemoryUsage");
-        if (_simulateLargeMemoryUsage)
-        {
-            const int DefaultRetentionMs = 5000;
-            var retentionTimespan = TimeSpan.FromMilliseconds(DefaultRetentionMs);
-            _memoryCleaner = new System.Timers.Timer(interval: DefaultRetentionMs);
-            _memoryCleaner.Elapsed += (s, e) =>
-            {
-                var now = DateTime.UtcNow;
-                while (_simulatedData.TryPeek(out var record) && now - record.Time >= retentionTimespan)
-                    _simulatedData.TryDequeue(out record);
-            };
-            _memoryCleaner.AutoReset = true;
-            _memoryCleaner.Start();
-        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -270,10 +255,16 @@ public class Worker : BackgroundService
             var payload = e.ApplicationMessage.PayloadSegment.Array;
 
             var taskScope = await _rateLimiters.TaskLimiter.TryAcquire(count: 1);
-            var sizeScope = taskScope != null ? await _rateLimiters.SizeLimiter.TryAcquire(count: payload.Length) : null;
-            var rateScope = sizeScope != null ? new SimpleAsyncScope(taskScope, sizeScope) : null;
-            if (rateScope == null && taskScope != null)
-                await taskScope.DisposeAsync();
+            IAsyncDisposable rateScope;
+            if (_rateLimiters.SizeLimiter != null)
+            {
+                var sizeScope = taskScope != null ? await _rateLimiters.SizeLimiter.TryAcquire(count: payload.Length) : null;
+                rateScope = sizeScope != null ? new SimpleAsyncScope(taskScope, sizeScope) : null;
+                if (rateScope == null && taskScope != null)
+                    await taskScope.DisposeAsync();
+            }
+            else rateScope = taskScope;
+
             await _taskRunner.RunSyncAsync(rateScope, async (scope) =>
             {
                 await using var _ = scope;
@@ -348,10 +339,15 @@ public class Worker : BackgroundService
 
     private void SimulateLargeMemoryUsage(MessageWrapper message)
     {
-        var dataSize = message.PayloadHash.Length * Random.Shared.NextInt64(minValue: 1, maxValue: 6);
+        var dataSize = message.PayloadHash.Length * Random.Shared.NextInt64(minValue: 20, maxValue: 50);
         var data = new byte[dataSize];
         Array.Fill(data, (byte)1);
-        _simulatedData.Enqueue((DateTime.UtcNow, data));
+        lock (_simulatedData)
+        {
+            _simulatedData.Enqueue((DateTime.UtcNow, data));
+            while (_simulatedData.Count >= DefaultSimulatedRetentionCount)
+                _simulatedData.TryDequeue(out _);
+        }
     }
 
     private async Task ProcessBatch(MqttClientWrapper wrapper, MessageWrapper message, bool isFlushInterval)
@@ -580,7 +576,6 @@ public class Worker : BackgroundService
             wrapper.Client.Dispose();
         _mqttClients.Clear();
         _circuitTokenSource?.Dispose();
-        _memoryCleaner?.Dispose();
     }
 }
 

@@ -24,6 +24,7 @@ services:
       AppSettings__ProcessingTime: 20
       AppSettings__NumberOfConnections: 20
       AppSettings__BackgroundProcessing: true
+      AppSettings__ScaleBySize: false
       AppSettings__SimulateLargeMemoryUsage: true
       AppSettings__CheckDuplicates: true
 

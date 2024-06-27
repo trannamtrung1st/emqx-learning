@@ -14,6 +14,7 @@ IHost host = Host.CreateDefaultBuilder(args)
         var rateScalingConfig = context.Configuration.GetSection("RateScaling");
         var taskLimiterConfig = context.Configuration.GetSection("TaskLimiter");
         var sizeLimiterConfig = context.Configuration.GetSection("SizeLimiter");
+        var scaleBySize = context.Configuration.GetValue<bool>("AppSettings:ScaleBySize");
 
         services.AddHostedService<Worker>();
         services.AddResourceMonitor()
@@ -21,7 +22,7 @@ IHost host = Host.CreateDefaultBuilder(args)
             .AddResourceBasedRateScaling(configure: rateScalingConfig.Bind)
             .AddConsumerRateLimiters(
                 configureTaskLimiter: taskLimiterConfig.Bind,
-                configureSizeLimiter: sizeLimiterConfig.Bind
+                configureSizeLimiter: scaleBySize ? sizeLimiterConfig.Bind : null
             )
             .AddSyncAsyncTaskRunner()
             .AddRedis(connStr: context.Configuration.GetConnectionString("Redis"));
