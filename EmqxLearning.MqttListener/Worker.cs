@@ -259,14 +259,14 @@ public class Worker : BackgroundService
             e.AutoAcknowledge = false;
             var payload = e.ApplicationMessage.PayloadSegment.Array;
 
-            var taskScope = await _rateLimiters.TaskLimiter.TryAcquire(count: 1);
-            IAsyncDisposable rateScope;
+            var taskScope = _rateLimiters.TaskLimiter.TryAcquire(count: 1);
+            IDisposable rateScope;
             if (_rateLimiters.SizeLimiter != null)
             {
-                var sizeScope = taskScope != null ? await _rateLimiters.SizeLimiter.TryAcquire(count: payload.Length) : null;
-                rateScope = sizeScope != null ? new SimpleAsyncScope(taskScope, sizeScope) : null;
+                var sizeScope = taskScope != null ? _rateLimiters.SizeLimiter.TryAcquire(count: payload.Length) : null;
+                rateScope = sizeScope != null ? new SimpleScope(taskScope, sizeScope) : null;
                 if (rateScope == null && taskScope != null)
-                    await taskScope.DisposeAsync();
+                    taskScope.Dispose();
             }
             else rateScope = taskScope;
 
@@ -488,7 +488,7 @@ public class Worker : BackgroundService
                 await StopMqttClients();
                 _rabbitMqConnectionManager.Close();
                 foreach (var rateLimiter in _rateLimiters.RateLimiters)
-                    await rateLimiter.ResetLimit();
+                    rateLimiter.ResetLimit();
                 _isCircuitOpen = true;
                 _logger.LogWarning("Circuit breaker is now open");
             }
