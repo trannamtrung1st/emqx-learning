@@ -3,7 +3,7 @@
 services:
   # MQTT listeners
   mqtt-listener-1:
-    image: emqx-learning/mqtt-listner:latest
+    image: emqx-learning/mqtt-listner:old-scaling
     # logging:
     #   driver: none
     build:
