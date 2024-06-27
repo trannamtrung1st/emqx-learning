@@ -3,10 +3,10 @@ namespace EmqxLearning.Shared.Diagnostic.Abstracts;
 public interface IResourceMonitor
 {
     double TotalCores { get; }
+    event EventHandler<(double Cpu, double Memory)> Collected;
 
-    void Start();
+    void Start(double interval = 5000);
     void Stop();
     double GetCpuUsage();
     double GetMemoryUsage();
-    void SetMonitor(Func<double, double, Task> monitorCallback, double interval = 10000);
 }

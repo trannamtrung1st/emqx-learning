@@ -16,6 +16,7 @@ using StackExchange.Redis;
 using EmqxLearning.Shared.Helpers;
 using EmqxLearning.Shared.Concurrency.Abstracts;
 using EmqxLearning.Shared.Concurrency;
+using EmqxLearning.Shared.Diagnostic.Abstracts;
 
 namespace EmqxLearning.MqttListener;
 
@@ -31,15 +32,18 @@ public class Worker : BackgroundService
     private readonly ISyncAsyncTaskRunner _taskRunner;
     private readonly IConsumerRateLimiters _rateLimiters;
     private readonly IRateScalingController _rateScalingController;
+    private readonly IResourceMonitor _resourceMonitor;
     private readonly IDatabase _cacheDb;
     private CancellationToken _stoppingToken;
     private CancellationTokenSource _circuitTokenSource;
     private int _cacheHitCount = 0;
     private bool _isCircuitOpen;
+    private bool _shouldBreak;
 
     private readonly bool _simulateLargeMemoryUsage;
     private readonly ConcurrentQueue<(DateTime Time, byte[])> _simulatedData = new();
-    private const int DefaultSimulatedRetentionCount = 200_000;
+    private readonly System.Timers.Timer _simulatedCleaner;
+    private const int DefaultSimulatedRetentionCount = 30_000;
 
     public Worker(ILogger<Worker> logger,
         IConfiguration configuration,
@@ -48,11 +52,13 @@ public class Worker : BackgroundService
         IRateScalingController rateScalingController,
         ConnectionMultiplexer connectionMultiplexer,
         ISyncAsyncTaskRunner taskRunner,
-        IConsumerRateLimiters rateLimiters)
+        IConsumerRateLimiters rateLimiters,
+        IResourceMonitor resourceMonitor)
     {
         _logger = logger;
         _configuration = configuration;
         _rateScalingController = rateScalingController;
+        _resourceMonitor = resourceMonitor;
         _rabbitMqConnectionManager = rabbitMqConnectionManager;
         _taskRunner = taskRunner;
         _rateLimiters = rateLimiters;
@@ -62,6 +68,17 @@ public class Worker : BackgroundService
         _connectionErrorsPipeline = resiliencePipelineProvider.GetPipeline(Constants.ResiliencePipelines.ConnectionErrors);
         _transientErrorsPipeline = resiliencePipelineProvider.GetPipeline(Constants.ResiliencePipelines.TransientErrors);
         _simulateLargeMemoryUsage = _configuration.GetValue<bool>("AppSettings:SimulateLargeMemoryUsage");
+
+        var interval = TimeSpan.FromSeconds(15);
+        _simulatedCleaner = new System.Timers.Timer(interval: 15000);
+        _simulatedCleaner.Elapsed += (s, e) =>
+        {
+            var now = DateTime.UtcNow;
+            while (_simulatedData.TryPeek(out var record) && record.Time - now > interval)
+                _simulatedData.TryDequeue(out record);
+        };
+        _simulatedCleaner.AutoReset = true;
+        _simulatedCleaner.Start();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -73,6 +90,14 @@ public class Worker : BackgroundService
         for (int i = 0; i < noOfConns; i++)
             InitializeMqttClient(i);
 
+        var resourceMonitorInterval = _configuration.GetValue<int>("AppSettings:ResourceMonitorInterval");
+        _resourceMonitor.Start(interval: resourceMonitorInterval);
+        _resourceMonitor.Collected += (o, e) =>
+        {
+            var (cpu, mem) = e;
+            _logger.LogInformation("===== Resource consumption =====\nCPU: {Cpu} - Memory: {Memory}", cpu, mem);
+            _shouldBreak = mem > 0.75;
+        };
         _rateScalingController.StartRateCollector(rateLimiters: _rateLimiters.RateLimiters);
         _rateScalingController.Start(rateLimiters: _rateLimiters.RateLimiters);
         await StartMqttClients();
@@ -255,6 +280,12 @@ public class Worker : BackgroundService
     {
         try
         {
+            if (_shouldBreak)
+            {
+                _ = Task.Run(HandleOpenCircuit);
+                return;
+            }
+
             wrapper.LastMessageTime = DateTime.UtcNow;
             e.AutoAcknowledge = false;
             var payload = e.ApplicationMessage.PayloadSegment.Array;
@@ -326,10 +357,16 @@ public class Worker : BackgroundService
 
     private async Task HandleOpenCircuit()
     {
-        await OpenCircuit();
-        var reconnectAfter = _configuration.GetValue<int>("ResilienceSettings:CircuitBreakerReconnectAfter");
-        System.Timers.Timer closeTimer = new System.Timers.Timer(reconnectAfter);
-        closeTimer.Elapsed += async (s, e) => await CloseCircuit();
+        var opened = await OpenCircuit();
+        if (!opened) return;
+        var closeAfter = _configuration.GetValue<int>("ResilienceSettings:CloseCircuitBreakerAfter");
+        System.Timers.Timer closeTimer = new System.Timers.Timer(closeAfter);
+        closeTimer.Elapsed += async (s, e) =>
+        {
+            while (_shouldBreak)
+                await Task.Delay(closeAfter);
+            await CloseCircuit();
+        };
         closeTimer.AutoReset = false;
         closeTimer.Start();
     }
@@ -344,7 +381,7 @@ public class Worker : BackgroundService
 
     private void SimulateLargeMemoryUsage(MessageWrapper message)
     {
-        var dataSize = message.PayloadHash.Length * Random.Shared.NextInt64(minValue: 20, maxValue: 50);
+        var dataSize = message.EventArgs.ApplicationMessage.PayloadSegment.Array.Length;
         var data = new byte[dataSize];
         Array.Fill(data, (byte)1);
         lock (_simulatedData)
@@ -472,7 +509,7 @@ public class Worker : BackgroundService
             body: bytes);
     }
 
-    private async Task OpenCircuit()
+    private async Task<bool> OpenCircuit()
     {
         var lockTimeout = _configuration.GetValue<TimeSpan>("AppSettings:CircuitLockTimeout");
         var acquired = await _circuitLock.WaitAsync(lockTimeout);
@@ -480,7 +517,7 @@ public class Worker : BackgroundService
         {
             try
             {
-                if (_isCircuitOpen == true) return;
+                if (_isCircuitOpen == true) return false;
                 _logger.LogWarning("Opening circuit breaker ...");
                 _rateScalingController.Stop();
                 _rateScalingController.StopRateCollector();
@@ -494,6 +531,7 @@ public class Worker : BackgroundService
             }
             finally { _circuitLock.Release(); }
         }
+        return acquired;
     }
 
     private async Task CloseCircuit()

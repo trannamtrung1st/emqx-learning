@@ -43,10 +43,12 @@ public sealed class SimpleAsyncScope : IAsyncDisposable
         _onDispose = async () =>
         {
             foreach (var obj in disposables)
+            {
                 if (obj is IDisposable disposable)
                     try { disposable.Dispose(); } catch { }
                 else if (obj is IAsyncDisposable asyncDisposable)
                     try { await asyncDisposable.DisposeAsync(); } catch { }
+            }
         };
     }
 

@@ -2,7 +2,6 @@ namespace EmqxLearning.Shared.Concurrency.Configurations;
 
 public class ResourceBasedRateScalingOptions
 {
-    public double ScaleCheckInterval { get; set; }
     public IDictionary<string, ScalingParameters> Parameters { get; set; }
     public RateCollectorOptions RateCollectorOptions { get; set; }
 }
