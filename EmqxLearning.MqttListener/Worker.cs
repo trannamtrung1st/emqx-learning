@@ -16,6 +16,7 @@ using StackExchange.Redis;
 using EmqxLearning.Shared.Helpers;
 using EmqxLearning.Shared.Concurrency.Abstracts;
 using EmqxLearning.Shared.Concurrency;
+using EmqxLearning.Shared.Diagnostic.Abstracts;
 
 namespace EmqxLearning.MqttListener;
 
@@ -31,11 +32,13 @@ public class Worker : BackgroundService
     private readonly ISyncAsyncTaskRunner _taskRunner;
     private readonly IConsumerRateLimiters _rateLimiters;
     private readonly IRateScalingController _rateScalingController;
+    private readonly IResourceMonitor _resourceMonitor;
     private readonly IDatabase _cacheDb;
     private CancellationToken _stoppingToken;
     private CancellationTokenSource _circuitTokenSource;
     private int _cacheHitCount = 0;
     private bool _isCircuitOpen;
+    private bool _shouldBreak;
 
     public Worker(ILogger<Worker> logger,
         IConfiguration configuration,
@@ -44,11 +47,13 @@ public class Worker : BackgroundService
         IRateScalingController rateScalingController,
         ConnectionMultiplexer connectionMultiplexer,
         ISyncAsyncTaskRunner taskRunner,
-        IConsumerRateLimiters rateLimiters)
+        IConsumerRateLimiters rateLimiters,
+        IResourceMonitor resourceMonitor)
     {
         _logger = logger;
         _configuration = configuration;
         _rateScalingController = rateScalingController;
+        _resourceMonitor = resourceMonitor;
         _rabbitMqConnectionManager = rabbitMqConnectionManager;
         _taskRunner = taskRunner;
         _rateLimiters = rateLimiters;
@@ -68,6 +73,14 @@ public class Worker : BackgroundService
         for (int i = 0; i < noOfConns; i++)
             InitializeMqttClient(i);
 
+        var resourceMonitorInterval = _configuration.GetValue<int>("AppSettings:ResourceMonitorInterval");
+        _resourceMonitor.Start(interval: resourceMonitorInterval);
+        _resourceMonitor.Collected += (o, e) =>
+        {
+            var (cpu, mem) = e;
+            _logger.LogInformation("===== Resource consumption =====\nCPU: {Cpu} - Memory: {Memory}", cpu, mem);
+            _shouldBreak = mem > 0.75;
+        };
         _rateScalingController.StartRateCollector(rateLimiters: _rateLimiters.RateLimiters);
         _rateScalingController.Start(rateLimiters: _rateLimiters.RateLimiters);
         await StartMqttClients();
@@ -250,15 +263,22 @@ public class Worker : BackgroundService
     {
         try
         {
+            if (_shouldBreak)
+            {
+                _ = Task.Run(HandleOpenCircuit);
+                return;
+            }
+
             wrapper.LastMessageTime = DateTime.UtcNow;
             e.AutoAcknowledge = false;
             var payload = e.ApplicationMessage.PayloadSegment.Array;
 
-            var taskScope = await _rateLimiters.TaskLimiter.TryAcquire(count: 1);
-            var sizeScope = taskScope != null ? await _rateLimiters.SizeLimiter.TryAcquire(count: payload.Length) : null;
-            var rateScope = sizeScope != null ? new SimpleAsyncScope(taskScope, sizeScope) : null;
+            var taskScope = _rateLimiters.TaskLimiter.TryAcquire(count: 1);
+            var sizeScope = taskScope != null ? _rateLimiters.SizeLimiter.TryAcquire(count: payload.Length) : null;
+            var rateScope = sizeScope != null ? new SimpleScope(taskScope, sizeScope) : null;
             if (rateScope == null && taskScope != null)
-                await taskScope.DisposeAsync();
+                taskScope.Dispose();
+
             await _taskRunner.RunSyncAsync(rateScope, async (scope) =>
             {
                 await using var _ = scope;
@@ -315,10 +335,16 @@ public class Worker : BackgroundService
 
     private async Task HandleOpenCircuit()
     {
-        await OpenCircuit();
-        var reconnectAfter = _configuration.GetValue<int>("ResilienceSettings:CircuitBreakerReconnectAfter");
-        System.Timers.Timer closeTimer = new System.Timers.Timer(reconnectAfter);
-        closeTimer.Elapsed += async (s, e) => await CloseCircuit();
+        var opened = await OpenCircuit();
+        if (!opened) return;
+        var closeAfter = _configuration.GetValue<int>("ResilienceSettings:CloseCircuitBreakerAfter");
+        System.Timers.Timer closeTimer = new System.Timers.Timer(closeAfter);
+        closeTimer.Elapsed += async (s, e) =>
+        {
+            while (_shouldBreak)
+                await Task.Delay(closeAfter);
+            await CloseCircuit();
+        };
         closeTimer.AutoReset = false;
         closeTimer.Start();
     }
@@ -446,7 +472,7 @@ public class Worker : BackgroundService
             body: bytes);
     }
 
-    private async Task OpenCircuit()
+    private async Task<bool> OpenCircuit()
     {
         var lockTimeout = _configuration.GetValue<TimeSpan>("AppSettings:CircuitLockTimeout");
         var acquired = await _circuitLock.WaitAsync(lockTimeout);
@@ -454,7 +480,7 @@ public class Worker : BackgroundService
         {
             try
             {
-                if (_isCircuitOpen == true) return;
+                if (_isCircuitOpen == true) return false;
                 _logger.LogWarning("Opening circuit breaker ...");
                 _rateScalingController.Stop();
                 _rateScalingController.StopRateCollector();
@@ -462,12 +488,13 @@ public class Worker : BackgroundService
                 await StopMqttClients();
                 _rabbitMqConnectionManager.Close();
                 foreach (var rateLimiter in _rateLimiters.RateLimiters)
-                    await rateLimiter.ResetLimit();
+                    rateLimiter.ResetLimit();
                 _isCircuitOpen = true;
                 _logger.LogWarning("Circuit breaker is now open");
             }
             finally { _circuitLock.Release(); }
         }
+        return acquired;
     }
 
     private async Task CloseCircuit()

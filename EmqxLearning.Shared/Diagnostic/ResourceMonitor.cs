@@ -22,10 +22,11 @@ public class ResourceMonitor : IResourceMonitor
             TotalCores = Environment.ProcessorCount;
     }
 
+    public event EventHandler<(double Cpu, double Memory)> Collected;
     public double TotalCores { get; }
     public static bool IsLinux => RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
 
-    public double GetTotalCores()
+    public static double GetTotalCores()
     {
         var cpuMaxOutput = ExecuteCommand("cat /sys/fs/cgroup/cpu.max");
         var cpuMax = cpuMaxOutput.Split(" ");
@@ -44,7 +45,7 @@ public class ResourceMonitor : IResourceMonitor
         return cpuUtil;
     }
 
-    private long GetCpuUsageMs()
+    private static long GetCpuUsageMs()
     {
         var cpuStat = ExecuteCommand("cat /sys/fs/cgroup/cpu.stat");
         var usage = cpuStat.Split(Environment.NewLine)[0].Split(" ")[1];
@@ -60,26 +61,27 @@ public class ResourceMonitor : IResourceMonitor
         return used / total;
     }
 
-    public void SetMonitor(Func<double, double, Task> monitorCallback, double interval = 5000)
+    public void Start(double interval = 5000)
     {
         if (!IsLinux)
             return;
-        _currentTimer?.Stop();
-        _currentTimer = new System.Timers.Timer(interval);
-        _currentTimer.Elapsed += async (s, e) =>
+        if (_currentTimer == null)
         {
-            var cpuUsage = GetCpuUsage();
-            var memUsage = GetMemoryUsage();
-            await monitorCallback(cpuUsage, memUsage);
-        };
-        _currentTimer.AutoReset = true;
+            _currentTimer = new System.Timers.Timer(interval);
+            _currentTimer.Elapsed += (s, e) =>
+            {
+                var cpuUsage = GetCpuUsage();
+                var memUsage = GetMemoryUsage();
+                Collected?.Invoke(this, (cpuUsage, memUsage));
+            };
+            _currentTimer.AutoReset = true;
+        }
+        _currentTimer.Start();
     }
-
-    public void Start() => _currentTimer?.Start();
 
     public void Stop() => _currentTimer?.Stop();
 
-    private string ExecuteCommand(string command)
+    private static string ExecuteCommand(string command)
     {
         string output = null;
         var info = new ProcessStartInfo();

@@ -16,6 +16,7 @@ public class ResourceBasedRateScalingController : IRateScalingController, IDispo
     private bool _resourceMonitorSet = false;
     private double _lastCpu;
     private double _lastMem;
+    private bool _enabled;
 
     public ResourceBasedRateScalingController(
         IResourceBasedFuzzyRateScaler fuzzyRateScaler,
@@ -33,32 +34,28 @@ public class ResourceBasedRateScalingController : IRateScalingController, IDispo
     {
         if (!_resourceMonitorSet)
         {
-            _resourceMonitorSet = true;
             var scalingOptions = _options.Value;
-            _resourceMonitor.SetMonitor((cpu, mem) =>
+            _resourceMonitorSet = true;
+            _resourceMonitor.Collected += (o, e) =>
             {
+                if (!_enabled) return;
                 try
                 {
-                    _logger.LogInformation("===== Resource consumption =====\nCPU: {Cpu} - Memory: {Memory}", cpu, mem);
-
+                    var (cpu, mem) = e;
                     foreach (var rateLimiter in rateLimiters)
                     {
                         var parameters = scalingOptions.Parameters[rateLimiter.Name];
                         ScaleRate(rateLimiter, cpu, mem, parameters);
                     }
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, ex.Message);
-                }
-                return Task.CompletedTask;
-            }, interval: scalingOptions.ScaleCheckInterval);
+                catch (Exception ex) { _logger.LogError(ex, ex.Message); }
+            };
         }
 
-        _resourceMonitor.Start();
+        _enabled = true;
     }
 
-    public void Stop() => _resourceMonitor?.Stop();
+    public void Stop() => _enabled = false;
 
     private void ScaleRate(IDynamicRateLimiter rateLimiter, double cpu, double mem, ScalingParameters parameters)
     {
