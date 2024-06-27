@@ -131,5 +131,6 @@ public class DynamicRateLimiter : IDynamicRateLimiter, IDisposable
     {
         GC.SuppressFinalize(this);
         _availableEvent.Dispose();
+        _lock.Dispose();
     }
 }
