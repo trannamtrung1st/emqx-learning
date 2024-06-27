@@ -2,14 +2,14 @@ namespace EmqxLearning.Shared.Concurrency.Abstracts;
 
 public interface IDynamicRateLimiter : IDisposable
 {
-    (long Limit, long Acquired, long Available, long QueueCount) State { get; }
+    (int Limit, int Acquired, int Available, int QueueCount) State { get; }
 
     string Name { get; }
-    long InitialLimit { get; }
-    long ResetLimit();
-    long SetLimit(long limit);
-    IDisposable Acquire(long count);
-    bool TryAcquire(long count, out IDisposable scope);
-    void GetRateStatistics(out long availableCountAvg, out long queueCountAvg);
+    int InitialLimit { get; }
+    Task<long> ResetLimit();
+    Task<long> SetLimit(int limit);
+    Task<IAsyncDisposable> Acquire(int count);
+    Task<IAsyncDisposable> TryAcquire(int count);
+    void GetRateStatistics(out int availableCountAvg, out int queueCountAvg);
     void CollectRate(int movingAverageRange);
 }

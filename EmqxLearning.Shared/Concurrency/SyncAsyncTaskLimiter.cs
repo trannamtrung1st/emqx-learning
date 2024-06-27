@@ -18,18 +18,18 @@ public class SyncAsyncTaskLimiter : DynamicRateLimiter, ISyncAsyncTaskLimiter
         logger.LogDebug("Max async limit: {Limit}", _maxAsyncLimit);
     }
 
-    protected override IDisposable AcquireCore(long count, bool wait)
+    protected override async Task<IAsyncDisposable> AcquireCore(int count, bool wait)
     {
-        var disposable = base.AcquireCore(count, wait);
+        var disposable = await base.AcquireCore(count, wait);
         if (disposable != null)
             Interlocked.Increment(ref _asyncCount);
         return disposable;
     }
 
-    protected override void Release(long count)
+    protected override Task Release(int count)
     {
         Interlocked.Decrement(ref _asyncCount);
-        base.Release(count);
+        return base.Release(count);
     }
 
     protected override bool CanAcquired() => _asyncCount < _maxAsyncLimit && base.CanAcquired();

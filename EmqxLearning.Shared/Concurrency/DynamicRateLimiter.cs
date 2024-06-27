@@ -6,40 +6,43 @@ namespace EmqxLearning.Shared.Concurrency;
 public class DynamicRateLimiter : IDynamicRateLimiter, IDisposable
 {
     private readonly ManualResetEventSlim _availableEvent;
-    private readonly object _lock = new();
+    private readonly SemaphoreSlim _lock = new(1);
     private readonly RateLimiterOptions _limiterOptions;
     private readonly Queue<long> _queueCounts = new();
     private readonly Queue<long> _availableCounts = new();
-    private long _limit = 0;
-    private long _queueCount = 0;
-    private long _acquired = 0;
+    private int _limit = 0;
+    private int _queueCount = 0;
+    private int _acquired = 0;
 
     public DynamicRateLimiter(RateLimiterOptions limiterOptions)
     {
         _availableEvent = new ManualResetEventSlim();
         _limiterOptions = limiterOptions;
-        SetLimit(limit: _limiterOptions.InitialLimit);
+        SetLimit(limit: _limiterOptions.InitialLimit).Wait();
     }
 
     public string Name => _limiterOptions.Name;
-    public long InitialLimit => _limiterOptions.InitialLimit;
-    public (long Limit, long Acquired, long Available, long QueueCount) State
+    public int InitialLimit => _limiterOptions.InitialLimit;
+    public (int Limit, int Acquired, int Available, int QueueCount) State
     {
         get
         {
-            lock (_lock)
-            {
-                return (_limit, _acquired, _limit - _acquired, _queueCount);
-            }
+            _lock.Wait();
+            try { return (_limit, _acquired, _limit - _acquired, _queueCount); }
+            finally { _lock.Release(); }
         }
     }
 
-    public IDisposable Acquire(long count)
+    public Task<IAsyncDisposable> Acquire(int count)
         => AcquireCore(count, wait: true);
 
-    protected virtual void Release(long count)
+    public Task<IAsyncDisposable> TryAcquire(int count)
+        => AcquireCore(count, wait: false);
+
+    protected virtual async Task Release(int count)
     {
-        lock (_lock)
+        await _lock.WaitAsync();
+        try
         {
             if (_acquired > 0)
             {
@@ -47,29 +50,26 @@ public class DynamicRateLimiter : IDynamicRateLimiter, IDisposable
                 _availableEvent.Set();
             }
         }
+        finally { _lock.Release(); }
     }
 
-    public long SetLimit(long limit)
+    public async Task<long> SetLimit(int limit)
     {
         var acceptedLimit = GetAcceptedLimit(limit);
-        lock (_lock)
+        await _lock.WaitAsync();
+        try
         {
             var prevLimit = _limit;
             _limit = acceptedLimit;
             if (_limit > prevLimit) _availableEvent.Set();
         }
+        finally { _lock.Release(); }
         return acceptedLimit;
     }
 
-    public long ResetLimit() => SetLimit(limit: _limiterOptions.InitialLimit);
+    public Task<long> ResetLimit() => SetLimit(limit: _limiterOptions.InitialLimit);
 
-    public bool TryAcquire(long count, out IDisposable scope)
-    {
-        scope = AcquireCore(count, wait: false);
-        return scope != null;
-    }
-
-    protected virtual IDisposable AcquireCore(long count, bool wait)
+    protected virtual async Task<IAsyncDisposable> AcquireCore(int count, bool wait)
     {
         if (_limit == 0)
             return null;
@@ -79,7 +79,8 @@ public class DynamicRateLimiter : IDynamicRateLimiter, IDisposable
         {
             while (!acquired)
             {
-                lock (_lock)
+                await _lock.WaitAsync();
+                try
                 {
                     if (!queued)
                     {
@@ -94,6 +95,7 @@ public class DynamicRateLimiter : IDynamicRateLimiter, IDisposable
                     }
                     else _availableEvent.Reset();
                 }
+                finally { _lock.Release(); }
 
                 if (!acquired)
                 {
@@ -101,19 +103,19 @@ public class DynamicRateLimiter : IDynamicRateLimiter, IDisposable
                     else return null;
                 }
             }
-            return new SimpleScope(() => Release(count));
+            return new SimpleAsyncScope(() => Release(count));
         }
         finally { if (queued) Interlocked.Add(ref _queueCount, -count); }
     }
 
-    protected virtual long GetAcceptedLimit(long limit) => limit;
+    protected virtual int GetAcceptedLimit(int limit) => limit;
 
     protected virtual bool CanAcquired() => _acquired < _limit;
 
-    public void GetRateStatistics(out long availableCountAvg, out long queueCountAvg)
+    public void GetRateStatistics(out int availableCountAvg, out int queueCountAvg)
     {
-        availableCountAvg = _availableCounts.Count > 0 ? (long)_availableCounts.Average() : 0;
-        queueCountAvg = _queueCounts.Count > 0 ? (long)_queueCounts.Average() : 0;
+        availableCountAvg = _availableCounts.Count > 0 ? (int)_availableCounts.Average() : 0;
+        queueCountAvg = _queueCounts.Count > 0 ? (int)_queueCounts.Average() : 0;
     }
 
     public void CollectRate(int movingAverageRange)

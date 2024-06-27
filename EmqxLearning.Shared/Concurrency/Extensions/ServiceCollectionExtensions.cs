@@ -35,8 +35,8 @@ public static partial class ServiceCollectionExtensions
     }
 
     public static IServiceCollection AddConsumerRateLimiters(this IServiceCollection services,
-        Action<TaskLimiterOptions> configureTaskLimiter,
-        Action<RateLimiterOptions> configureSizeLimiter)
+        Action<TaskLimiterOptions> configureTaskLimiter = null,
+        Action<RateLimiterOptions> configureSizeLimiter = null)
     {
         return services.AddSingleton<IConsumerRateLimiters>(provider =>
         {

@@ -73,8 +73,9 @@ public class ResourceBasedRateScalingController : IRateScalingController, IDispo
         _lastCpu = cpu; _lastMem = mem;
         var rateScale = _fuzzyRateScaler.GetRateScale(cpu, mem, ideal: parameters.IdealUsage, factor: scaleFactor);
         if (rateScale == 0) return;
-        var (rateLimit, acquired, availableCountAvg, queueCountAvg) = rateLimiter.State;
-        long newLimit;
+        var (rateLimit, acquired, _, _) = rateLimiter.State;
+        rateLimiter.GetRateStatistics(out var availableCountAvg, out var queueCountAvg);
+        int newLimit;
         if (rateScale < 0)
             newLimit = rateLimit + rateScale;
         else if (availableCountAvg > parameters.AcceptedAvailablePercentage * rateLimit && queueCountAvg <= parameters.AcceptedQueueCount)

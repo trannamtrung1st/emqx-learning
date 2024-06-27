@@ -4,7 +4,7 @@ namespace EmqxLearning.Shared.Concurrency.Configurations;
 public class TaskLimiterOptions : RateLimiterOptions
 {
     public new string Name { get; set; }
-    public new long InitialLimit { get; set; }
+    public new int InitialLimit { get; set; }
     public double AvailableCores { get; set; }
     public double TargetCpuUtil { get; set; }
     public double WaitTime { get; set; }
