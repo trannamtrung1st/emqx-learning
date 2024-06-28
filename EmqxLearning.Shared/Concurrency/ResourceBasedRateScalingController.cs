@@ -12,6 +12,7 @@ public class ResourceBasedRateScalingController : IRateScalingController, IDispo
     private readonly IResourceBasedFuzzyRateScaler _fuzzyRateScaler;
     private readonly ILogger<ResourceBasedRateScalingController> _logger;
     private readonly IOptions<ResourceBasedRateScalingOptions> _options;
+    private readonly Dictionary<string, int> _limiterLastAvailables;
     private System.Timers.Timer _rateCollector;
     private bool _resourceMonitorSet = false;
     private double _lastCpu;
@@ -28,6 +29,7 @@ public class ResourceBasedRateScalingController : IRateScalingController, IDispo
         _resourceMonitor = resourceMonitor;
         _logger = logger;
         _options = options;
+        _limiterLastAvailables = new();
     }
 
     public void Start(IEnumerable<IDynamicRateLimiter> rateLimiters)
@@ -69,22 +71,30 @@ public class ResourceBasedRateScalingController : IRateScalingController, IDispo
         }
         _lastCpu = cpu; _lastMem = mem;
         var rateScale = _fuzzyRateScaler.GetRateScale(cpu, mem, ideal: parameters.IdealUsage, factor: scaleFactor);
-        var (rateLimit, acquired, currentAvailable, _) = rateLimiter.State;
-        rateLimiter.GetRateStatistics(out var availableCountAvg, out var queueCountAvg);
+        rateLimiter.GetRateStatistics(out var availableCountAvg);
+        var (rateLimit, acquired, currentAvailable) = rateLimiter.State;
+        var minAvailable = Math.Min(currentAvailable, availableCountAvg);
+        _limiterLastAvailables.TryGetValue(rateLimiter.Name, out var lastAvailable);
         int newLimit;
         if (rateScale < 0)
             newLimit = rateLimit + rateScale;
-        else if (Math.Min(currentAvailable, availableCountAvg) > parameters.AcceptedAvailablePercentage * rateLimit && queueCountAvg <= parameters.AcceptedQueueCount)
-            newLimit = rateLimit - (int)(availableCountAvg * (1 - parameters.AcceptedAvailablePercentage));
+        else if (minAvailable > parameters.AcceptedAvailablePercentage * rateLimit)
+        {
+            var diff = Math.Abs(lastAvailable - availableCountAvg);
+            newLimit = rateLimit - Math.Max(rateScale / 2, diff / 2);
+        }
         else
+        {
+            _limiterLastAvailables[rateLimiter.Name] = availableCountAvg;
             newLimit = rateLimit + rateScale;
+        }
         if (newLimit < rateLimiter.InitialLimit) newLimit = rateLimiter.InitialLimit;
         rateLimiter.SetLimit(newLimit);
         _logger.LogInformation(
             "Limiter: {Limiter}\n" +
-            "Scale: {Scale} - Acquired: {Acquired} - Available: {Available} - Queue: {QueueCount}\n" +
+            "Scale: {Scale} - Acquired: {Acquired} - Available/Avg: {Available}/{AvailableAvg}\n" +
             "New rate limit: {Limit}",
-            rateLimiter.Name, rateScale, acquired, availableCountAvg, queueCountAvg, newLimit);
+            rateLimiter.Name, rateScale, acquired, currentAvailable, availableCountAvg, newLimit);
     }
 
     public void StartRateCollector(IEnumerable<IDynamicRateLimiter> rateLimiters)

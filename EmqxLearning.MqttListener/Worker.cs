@@ -35,7 +35,6 @@ public class Worker : BackgroundService
     private readonly IResourceMonitor _resourceMonitor;
     private readonly IDatabase _cacheDb;
     private CancellationToken _stoppingToken;
-    private CancellationTokenSource _circuitTokenSource;
     private int _cacheHitCount = 0;
     private bool _isCircuitOpen;
     private bool _shouldBreak;
@@ -43,7 +42,7 @@ public class Worker : BackgroundService
     private readonly bool _simulateLargeMemoryUsage;
     private readonly ConcurrentQueue<(DateTime Time, byte[])> _simulatedData = new();
     private readonly System.Timers.Timer _simulatedCleaner;
-    private const int DefaultSimulatedRetentionCount = 30_000;
+    private const int DefaultSimulatedRetentionCount = 15_000;
 
     public Worker(ILogger<Worker> logger,
         IConfiguration configuration,
@@ -63,7 +62,6 @@ public class Worker : BackgroundService
         _taskRunner = taskRunner;
         _rateLimiters = rateLimiters;
         _cacheDb = connectionMultiplexer.GetDatabase();
-        _circuitTokenSource = new CancellationTokenSource();
         _mqttClients = new ConcurrentBag<MqttClientWrapper>();
         _connectionErrorsPipeline = resiliencePipelineProvider.GetPipeline(Constants.ResiliencePipelines.ConnectionErrors);
         _transientErrorsPipeline = resiliencePipelineProvider.GetPipeline(Constants.ResiliencePipelines.TransientErrors);
@@ -76,6 +74,7 @@ public class Worker : BackgroundService
             var now = DateTime.UtcNow;
             while (_simulatedData.TryPeek(out var record) && record.Time - now > interval)
                 _simulatedData.TryDequeue(out record);
+            GC.Collect();
         };
         _simulatedCleaner.AutoReset = true;
         _simulatedCleaner.Start();
@@ -91,12 +90,13 @@ public class Worker : BackgroundService
             InitializeMqttClient(i);
 
         var resourceMonitorInterval = _configuration.GetValue<int>("AppSettings:ResourceMonitorInterval");
+        var maxMemoryUsage = _configuration.GetValue<double>("AppSettings:MaxMemoryUsage");
         _resourceMonitor.Start(interval: resourceMonitorInterval);
         _resourceMonitor.Collected += (o, e) =>
         {
             var (cpu, mem) = e;
             _logger.LogInformation("===== Resource consumption =====\nCPU: {Cpu} - Memory: {Memory}", cpu, mem);
-            _shouldBreak = mem > 0.75;
+            _shouldBreak = mem > maxMemoryUsage;
         };
         _rateScalingController.StartRateCollector(rateLimiters: _rateLimiters.RateLimiters);
         _rateScalingController.Start(rateLimiters: _rateLimiters.RateLimiters);
@@ -128,7 +128,7 @@ public class Worker : BackgroundService
                     do
                     {
                         var hasMessageIncoming = DateTime.UtcNow.AddSeconds(-checkLastMessageRangeInSecs) <= wrapper.LastMessageTime;
-                        completed = !hasMessageIncoming && wrapper.BatchCount == 0 && wrapper.BatchId == null && !wrapper.LastBatchFlushing;
+                        completed = !_isCircuitOpen && !hasMessageIncoming && wrapper.BatchCount == 0 && wrapper.BatchId == null && !wrapper.LastBatchFlushing;
                         _logger.LogDebug("Client: {Id} - Incoming: {Incoming} - BatchCount: {BatchCount} - BatchId: {BatchId} - Flushing: {Flushing}",
                             wrapper.ChannelId, hasMessageIncoming, wrapper.BatchCount, wrapper.BatchId, wrapper.LastBatchFlushing);
                         if (!completed) await Task.Delay(1000);
@@ -157,17 +157,7 @@ public class Worker : BackgroundService
         CancellationTokenRegistration stoppingReg = default;
         stoppingReg = _stoppingToken.Register(() =>
         {
-            using (stoppingReg) { _circuitTokenSource.Cancel(); }
-        });
-
-        CancellationTokenRegistration circuitReg = default;
-        circuitReg = _circuitTokenSource.Token.Register(() =>
-        {
-            using (circuitReg)
-            {
-                foreach (var wrapper in _mqttClients)
-                    wrapper.TokenSource.TryCancel();
-            }
+            using (stoppingReg) { OpenCircuit().Wait(); }
         });
     }
 
@@ -193,17 +183,20 @@ public class Worker : BackgroundService
     private async Task StopMqttClients()
     {
         foreach (var wrapper in _mqttClients)
+            await StopMqttClient(wrapper);
+    }
+
+    private static async Task StopMqttClient(MqttClientWrapper wrapper)
+    {
+        wrapper.FlushBatchTimer.Stop();
+        wrapper.TokenSource.TryCancel();
+        await wrapper.SafeAccessBatch((batch) =>
         {
-            wrapper.FlushBatchTimer.Stop();
-            wrapper.TokenSource.TryCancel();
-            await wrapper.SafeAccessBatch((batch) =>
-            {
-                batch.Clear();
-                wrapper.BatchId = null;
-                wrapper.LastBatchFlushing = false;
-            });
-            await wrapper.Client.StopAsync();
-        }
+            batch.Clear();
+            wrapper.BatchId = null;
+            wrapper.LastBatchFlushing = false;
+        });
+        await wrapper.Client.StopAsync();
     }
 
     private void InitializeMqttClient(int threadIdx)
@@ -337,7 +330,7 @@ public class Worker : BackgroundService
             {
                 Interlocked.Increment(ref _cacheHitCount);
                 _logger.LogWarning("Cache hit {Count}", _cacheHitCount);
-                await AcknowledgeAsync(e, wrapper.TokenSource.Token);
+                await AcknowledgeAsync(e, cancellationToken: wrapper.TokenSource.Token);
                 return true;
             }
         }
@@ -383,7 +376,6 @@ public class Worker : BackgroundService
     {
         var dataSize = message.EventArgs.ApplicationMessage.PayloadSegment.Array.Length;
         var data = new byte[dataSize];
-        Array.Fill(data, (byte)1);
         lock (_simulatedData)
         {
             _simulatedData.Enqueue((DateTime.UtcNow, data));
@@ -468,7 +460,7 @@ public class Worker : BackgroundService
                 async (token) =>
                 {
                     if (_isCircuitOpen) throw new CircuitOpenException();
-                    await e.AcknowledgeAsync(cancellationToken: token);
+                    await e.AcknowledgeAsync(cancellationToken: cancellationToken);
                 },
                 cancellationToken: cancellationToken);
         }
@@ -521,7 +513,6 @@ public class Worker : BackgroundService
                 _logger.LogWarning("Opening circuit breaker ...");
                 _rateScalingController.Stop();
                 _rateScalingController.StopRateCollector();
-                _circuitTokenSource.Cancel();
                 await StopMqttClients();
                 _rabbitMqConnectionManager.Close();
                 foreach (var rateLimiter in _rateLimiters.RateLimiters)
@@ -544,8 +535,6 @@ public class Worker : BackgroundService
             {
                 if (_isCircuitOpen == false) return;
                 _logger.LogWarning("Try closing circuit breaker ...");
-                _circuitTokenSource?.Dispose();
-                _circuitTokenSource = new CancellationTokenSource();
                 _connectionErrorsPipeline.Execute(() =>
                 {
                     try { _rabbitMqConnectionManager.Connect(); }
@@ -618,7 +607,6 @@ public class Worker : BackgroundService
         foreach (var wrapper in _mqttClients)
             wrapper.Client.Dispose();
         _mqttClients.Clear();
-        _circuitTokenSource?.Dispose();
     }
 }
 

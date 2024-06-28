@@ -10,6 +10,5 @@ public class ScalingParameters
 {
     public double IdealUsage { get; set; }
     public int ScaleFactor { get; set; }
-    public int AcceptedQueueCount { get; set; }
     public double AcceptedAvailablePercentage { get; set; }
 }
