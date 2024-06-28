@@ -25,6 +25,7 @@ services:
       AppSettings__NumberOfConnections: 20
       AppSettings__BackgroundProcessing: true
       AppSettings__CheckDuplicates: true
+      AppSettings__ResourceMonitorInterval: 2500
 
       TaskLimiter__InitialLimit: 8
       RateScaling__Parameters__TaskLimiter__ScaleFactor: 50
@@ -199,7 +200,7 @@ services:
       EMQX_DASHBOARD__DEFAULT_PASSWORD: "abc@123"
       EMQX_NODE_NAME: "emqx@node1.emqx.io"
       EMQX_MQTT__MAX_MQUEUE_LEN: 1000000
-      EMQX_MQTT__MAX_INFLIGHT: 256
+      EMQX_MQTT__MAX_INFLIGHT: 128
       EMQX_MQTT__RETRY_INTERVAL: "300s"
 
       # EMQX_GATEWAY__COAP__MOUNTPOINT: "coap/"
@@ -241,7 +242,7 @@ services:
   #     EMQX_DASHBOARD__DEFAULT_PASSWORD: "abc@123"
   #     EMQX_NODE_NAME: "emqx@node2.emqx.io"
   #     EMQX_MQTT__MAX_MQUEUE_LEN: 1000000
-  #     EMQX_MQTT__MAX_INFLIGHT: 256
+  #     EMQX_MQTT__MAX_INFLIGHT: 128
   #     EMQX_MQTT__RETRY_INTERVAL: "300s"
   #     EMQX_CLUSTER__DISCOVERY_STRATEGY: static
   #     EMQX_CLUSTER__STATIC__SEEDS: "[emqx@node1.emqx.io,emqx@node2.emqx.io]"

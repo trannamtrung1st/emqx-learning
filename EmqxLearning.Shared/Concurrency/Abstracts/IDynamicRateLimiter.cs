@@ -1,8 +1,10 @@
+using EmqxLearning.Shared.Concurrency.Models;
+
 namespace EmqxLearning.Shared.Concurrency.Abstracts;
 
 public interface IDynamicRateLimiter : IDisposable
 {
-    (int Limit, int Acquired, int Available, int QueueCount) State { get; }
+    RateLimiterState State { get; }
 
     string Name { get; }
     int InitialLimit { get; }
@@ -10,6 +12,6 @@ public interface IDynamicRateLimiter : IDisposable
     long SetLimit(int limit);
     IDisposable Acquire(int count);
     IDisposable TryAcquire(int count);
-    void GetRateStatistics(out int availableCountAvg, out int queueCountAvg);
+    void GetRateStatistics(out int availableCountAvg);
     void CollectRate(int movingAverageRange);
 }

@@ -35,10 +35,10 @@ public class ResourceBasedFuzzyRateScaler : IResourceBasedFuzzyRateScaler
         var oVeryHigh = overall.MembershipFunctions.AddTrapezoid("VeryHigh", 0.6, 0.8, 1, 1);
 
         FLS.MembershipFunctions.IMembershipFunction[][] ruleMatrix = new[] {
-            new[] { oVeryLow,   oLow,       oLow,       oHigh,      oVeryHigh },
-            new[] { oLow,       oLow,       oLow,       oHigh,      oVeryHigh },
-            new[] { oMedium,    oMedium,    oMedium,    oHigh,      oVeryHigh },
-            new[] { oHigh,      oHigh,      oHigh,      oHigh,      oVeryHigh },
+            new[] { oVeryLow,   oLow,       oMedium,    oVeryHigh,  oVeryHigh },
+            new[] { oLow,       oLow,       oMedium,    oVeryHigh,  oVeryHigh },
+            new[] { oMedium,    oMedium,    oMedium,    oVeryHigh,  oVeryHigh },
+            new[] { oHigh,      oHigh,      oHigh,      oVeryHigh,  oVeryHigh },
             new[] { oVeryHigh,  oVeryHigh,  oVeryHigh,  oVeryHigh,  oVeryHigh },
         };
 
