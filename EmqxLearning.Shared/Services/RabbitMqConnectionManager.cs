@@ -1,5 +1,4 @@
 using EmqxLearning.Shared.Services.Abstracts;
-using FLS;
 using RabbitMQ.Client;
 
 namespace EmqxLearning.Shared.Services;
@@ -39,7 +38,8 @@ public class RabbitMqConnectionManager : IRabbitMqConnectionManager, IDisposable
         try
         {
             CreateNewConnection();
-            _configureChannels.Keys.ForEach(key => CreateNewChannel(key));
+            foreach (var key in _configureChannels.Keys)
+                CreateNewChannel(key);
         }
         catch
         {
@@ -85,14 +85,14 @@ public class RabbitMqConnectionManager : IRabbitMqConnectionManager, IDisposable
 
     private void DisposeChannels()
     {
-        _channels.Values.ForEach(ch =>
+        foreach (var ch in _channels.Values)
         {
             if (ch?.IsClosed != true)
             {
                 ch?.Close();
                 ch?.Dispose();
             }
-        });
+        }
     }
 
     private void DisposeConnections()

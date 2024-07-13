@@ -14,9 +14,9 @@ using EmqxLearning.Shared.Exceptions;
 using MQTTnet.Internal;
 using StackExchange.Redis;
 using EmqxLearning.Shared.Helpers;
-using EmqxLearning.Shared.Concurrency.Abstracts;
-using EmqxLearning.Shared.Concurrency;
-using EmqxLearning.Shared.Diagnostic.Abstracts;
+using TNT.Boilerplates.Concurrency.Abstracts;
+using TNT.Boilerplates.Diagnostic.Abstracts;
+using TNT.Boilerplates.Common.Disposable;
 
 namespace EmqxLearning.MqttListener;
 
@@ -30,7 +30,7 @@ public class Worker : BackgroundService
     private readonly ResiliencePipeline _connectionErrorsPipeline;
     private readonly ResiliencePipeline _transientErrorsPipeline;
     private readonly ISyncAsyncTaskRunner _taskRunner;
-    private readonly IConsumerRateLimiters _rateLimiters;
+    private readonly IMultiRateLimiters _rateLimiters;
     private readonly IRateScalingController _rateScalingController;
     private readonly IResourceMonitor _resourceMonitor;
     private readonly IDatabase _cacheDb;
@@ -46,7 +46,7 @@ public class Worker : BackgroundService
         IRateScalingController rateScalingController,
         ConnectionMultiplexer connectionMultiplexer,
         ISyncAsyncTaskRunner taskRunner,
-        IConsumerRateLimiters rateLimiters,
+        IMultiRateLimiters rateLimiters,
         IResourceMonitor resourceMonitor)
     {
         _logger = logger;

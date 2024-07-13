@@ -3,6 +3,8 @@ using EmqxLearning.Shared.Exceptions;
 using EmqxLearning.Shared.Extensions;
 using Polly.Registry;
 using RabbitMQ.Client;
+using TNT.Boilerplates.Concurrency.Extensions;
+using TNT.Boilerplates.Diagnostic.Extensions;
 using Constants = EmqxLearning.MqttListener.Constants;
 
 int minThreads = 512;
@@ -19,7 +21,7 @@ IHost host = Host.CreateDefaultBuilder(args)
         services.AddResourceMonitor()
             .AddResourceBasedFuzzyRateScaler()
             .AddResourceBasedRateScaling(configure: rateScalingConfig.Bind)
-            .AddConsumerRateLimiters(
+            .AddMultiRateLimiters(
                 configureTaskLimiter: taskLimiterConfig.Bind,
                 configureSizeLimiter: sizeLimiterConfig.Bind
             )

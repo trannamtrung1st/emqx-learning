@@ -12,10 +12,7 @@
     <PackageReference Include="Polly.Core" Version="8.3.1" />
     <PackageReference Include="RabbitMQ.Client" Version="6.8.1" />
     <PackageReference Include="StackExchange.Redis" Version="2.2.88" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\FLS\FLS.csproj" />
+    <PackageReference Include="TNT.Boilerplates.Concurrency" Version="1.0.0" />
   </ItemGroup>
 
 </Project>
