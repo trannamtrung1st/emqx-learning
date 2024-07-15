@@ -79,7 +79,7 @@ public class Worker : BackgroundService
                 prefetchSize: 0, // RabbitMQ not implemented
                 prefetchCount: rabbitMqChannelOptions.GetValue<ushort>("PrefetchCount"),
                 global: false);
-            channel.ContinuationTimeout = _configuration.GetValue<TimeSpan?>("RabbitMqChannel:ContinuationTimeout") ?? channel.ContinuationTimeout;
+            channel.ContinuationTimeout = rabbitMqChannelOptions.GetValue<TimeSpan?>("ContinuationTimeout") ?? channel.ContinuationTimeout;
             channel.ModelShutdown += (sender, e) => OnModelShutdown(sender, e, channelId);
         }
         return ConfigureChannel;
