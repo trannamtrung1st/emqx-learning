@@ -146,39 +146,13 @@ public class Worker : BackgroundService
     private async Task RestartMqttClients()
     {
         foreach (var wrapper in _mqttClients)
-        {
-            var mqttClient = wrapper.Client;
-            await _connectionErrorsPipeline.ExecuteAsync(async (token) =>
-            {
-                try { await mqttClient.StartAsync(mqttClient.Options); }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning("Reconnecting MQTT client {ClientId} failed, reason: {Message}",
-                        mqttClient.Options.ClientOptions.ClientId,
-                        ex.Message);
-                    throw;
-                }
-            });
-        }
+            await wrapper.StartClient();
     }
 
     private async Task StopMqttClients()
     {
         foreach (var wrapper in _mqttClients)
-            await StopMqttClient(wrapper);
-    }
-
-    private static async Task StopMqttClient(MqttClientWrapper wrapper)
-    {
-        wrapper.FlushBatchTimer.Stop();
-        wrapper.TokenSource.TryCancel();
-        await wrapper.SafeAccessBatch((batch) =>
-        {
-            batch.Clear();
-            wrapper.BatchId = null;
-            wrapper.LastBatchFlushing = false;
-        });
-        await wrapper.Client.StopAsync();
+            await wrapper.StopClient();
     }
 
     private void InitializeMqttClient(int threadIdx)
@@ -209,7 +183,7 @@ public class Worker : BackgroundService
             .WithAutoReconnectDelay(TimeSpan.FromSeconds(_configuration.GetValue<int>("MqttClientOptions:ReconnectDelaySecs")))
             .WithClientOptions(options)
             .Build();
-        var wrapper = new MqttClientWrapper(mqttClient, managedOptions, threadIdx.ToString(), _stoppingToken, flushBatchInterval);
+        var wrapper = new MqttClientWrapper(mqttClient, managedOptions, _connectionErrorsPipeline, threadIdx.ToString(), _stoppingToken, flushBatchInterval);
         _mqttClients.Add(wrapper);
 
         mqttClient.ConnectedAsync += (e) => OnConnected(e, mqttClient);
@@ -528,10 +502,6 @@ public class Worker : BackgroundService
 
         foreach (var wrapper in _mqttClients)
         {
-            await _connectionErrorsPipeline.ExecuteAsync(async (token) =>
-                await wrapper.Client.StartAsync(wrapper.ManagedOptions),
-                cancellationToken: _stoppingToken);
-
             wrapper.FlushBatchTimer.Elapsed += async (s, e) =>
             {
                 try { await ProcessBatch(wrapper, message: null, isFlushInterval: true); }
@@ -542,7 +512,8 @@ public class Worker : BackgroundService
                 }
                 catch (Exception ex) { _logger.LogError(ex, ex.Message); }
             };
-            wrapper.FlushBatchTimer.Start();
+
+            await wrapper.StartClient();
         }
     }
 
@@ -592,6 +563,7 @@ internal class MqttClientWrapper
     private CancellationTokenSource _tokenSource;
     private readonly IManagedMqttClient _client;
     private readonly CancellationToken _stoppingToken;
+    private readonly ResiliencePipeline _connectionErrorsPipeline;
     private readonly ManagedMqttClientOptions _managedOptions;
     private readonly SemaphoreSlim _batchLock;
     private readonly Queue<MessageWrapper> _batch;
@@ -599,12 +571,14 @@ internal class MqttClientWrapper
     public MqttClientWrapper(
         IManagedMqttClient client,
         ManagedMqttClientOptions managedOptions,
+        ResiliencePipeline connectionErrorsPipeline,
         string channelId,
         CancellationToken stoppingToken,
         int flushBatchInterval)
     {
         _client = client;
         _managedOptions = managedOptions;
+        _connectionErrorsPipeline = connectionErrorsPipeline;
         _stoppingToken = stoppingToken;
         ChannelId = channelId;
         _batchLock = new SemaphoreSlim(1);
@@ -644,4 +618,27 @@ internal class MqttClientWrapper
             using (reg) { ResetTokenSource(); }
         });
     }
+
+    public async Task StartClient()
+    {
+        await _connectionErrorsPipeline.ExecuteAsync(async (token) =>
+            await Client.StartAsync(ManagedOptions),
+            cancellationToken: _stoppingToken);
+
+        FlushBatchTimer.Start();
+    }
+
+    public async Task StopClient()
+    {
+        FlushBatchTimer.Stop();
+        TokenSource.TryCancel();
+        await SafeAccessBatch((batch) =>
+        {
+            batch.Clear();
+            BatchId = null;
+            LastBatchFlushing = false;
+        });
+        await Client.StopAsync();
+    }
+
 }
