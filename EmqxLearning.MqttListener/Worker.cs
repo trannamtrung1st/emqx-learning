@@ -30,7 +30,7 @@ public class Worker : BackgroundService
     private readonly ResiliencePipeline _connectionErrorsPipeline;
     private readonly ResiliencePipeline _transientErrorsPipeline;
     private readonly ISyncAsyncTaskRunner _taskRunner;
-    private readonly IMultiRateLimiters _rateLimiters;
+    private readonly ILimiterManager _limiterManager;
     private readonly IRateScalingController _rateScalingController;
     private readonly IResourceMonitor _resourceMonitor;
     private readonly IDatabase _cacheDb;
@@ -46,7 +46,7 @@ public class Worker : BackgroundService
         IRateScalingController rateScalingController,
         ConnectionMultiplexer connectionMultiplexer,
         ISyncAsyncTaskRunner taskRunner,
-        IMultiRateLimiters rateLimiters,
+        ILimiterManager limiterManager,
         IResourceMonitor resourceMonitor)
     {
         _logger = logger;
@@ -55,7 +55,7 @@ public class Worker : BackgroundService
         _resourceMonitor = resourceMonitor;
         _rabbitMqConnectionManager = rabbitMqConnectionManager;
         _taskRunner = taskRunner;
-        _rateLimiters = rateLimiters;
+        _limiterManager = limiterManager;
         _cacheDb = connectionMultiplexer.GetDatabase();
         _mqttClients = new ConcurrentBag<MqttClientWrapper>();
         _connectionErrorsPipeline = resiliencePipelineProvider.GetPipeline(Constants.ResiliencePipelines.ConnectionErrors);
@@ -80,8 +80,8 @@ public class Worker : BackgroundService
             _logger.LogInformation("===== Resource consumption =====\nCPU: {Cpu} - Memory: {Memory}", cpu, mem);
             _shouldBreak = mem > maxMemoryUsage;
         };
-        _rateScalingController.StartRateCollector(rateLimiters: _rateLimiters.RateLimiters);
-        _rateScalingController.Start(rateLimiters: _rateLimiters.RateLimiters);
+        _rateScalingController.StartRateCollector(rateLimiters: _limiterManager.AllLimiters);
+        _rateScalingController.Start(rateLimiters: _limiterManager.AllLimiters);
         await StartMqttClients();
 
         while (!stoppingToken.IsCancellationRequested)
@@ -265,8 +265,10 @@ public class Worker : BackgroundService
             e.AutoAcknowledge = false;
             var payload = e.ApplicationMessage.PayloadSegment.Array;
 
-            var taskScope = _rateLimiters.TaskLimiter.TryAcquire(count: 1);
-            var sizeScope = taskScope != null ? _rateLimiters.SizeLimiter.TryAcquire(count: payload.Length) : null;
+            _limiterManager.TryGetTaskLimiter(Constants.LimiterNames.TaskLimiter, out var taskLimiter);
+            _limiterManager.TryGetRateLimiter(Constants.LimiterNames.SizeLimiter, out var sizeLimiter);
+            var taskScope = taskLimiter.TryAcquire(count: 1);
+            var sizeScope = taskScope != null ? sizeLimiter.TryAcquire(count: payload.Length) : null;
             var rateScope = sizeScope != null ? new SimpleScope(taskScope, sizeScope) : null;
             if (rateScope == null && taskScope != null)
                 taskScope.Dispose();
@@ -478,7 +480,7 @@ public class Worker : BackgroundService
                 _rateScalingController.StopRateCollector();
                 await StopMqttClients();
                 _rabbitMqConnectionManager.Close();
-                foreach (var rateLimiter in _rateLimiters.RateLimiters)
+                foreach (var rateLimiter in _limiterManager.AllLimiters)
                     rateLimiter.ResetLimit();
                 _isCircuitOpen = true;
                 _logger.LogWarning("Circuit breaker is now open");
@@ -507,8 +509,8 @@ public class Worker : BackgroundService
                         throw;
                     }
                 });
-                _rateScalingController.StartRateCollector(rateLimiters: _rateLimiters.RateLimiters);
-                _rateScalingController.Start(rateLimiters: _rateLimiters.RateLimiters);
+                _rateScalingController.StartRateCollector(rateLimiters: _limiterManager.AllLimiters);
+                _rateScalingController.Start(rateLimiters: _limiterManager.AllLimiters);
                 await RestartMqttClients();
                 _isCircuitOpen = false;
                 _logger.LogWarning("Circuit breaker is now closed");

@@ -3,6 +3,9 @@ using EmqxLearning.Shared.Exceptions;
 using EmqxLearning.Shared.Extensions;
 using Polly.Registry;
 using RabbitMQ.Client;
+using TNT.Boilerplates.Concurrency;
+using TNT.Boilerplates.Concurrency.Abstracts;
+using TNT.Boilerplates.Concurrency.Configurations;
 using TNT.Boilerplates.Concurrency.Extensions;
 using TNT.Boilerplates.Diagnostic.Extensions;
 using Constants = EmqxLearning.MqttListener.Constants;
@@ -14,17 +17,12 @@ IHost host = Host.CreateDefaultBuilder(args)
     .ConfigureServices((context, services) =>
     {
         var rateScalingConfig = context.Configuration.GetSection("RateScaling");
-        var taskLimiterConfig = context.Configuration.GetSection("TaskLimiter");
-        var sizeLimiterConfig = context.Configuration.GetSection("SizeLimiter");
 
         services.AddHostedService<Worker>();
         services.AddResourceMonitor()
             .AddResourceBasedFuzzyRateScaler()
             .AddResourceBasedRateScaling(configure: rateScalingConfig.Bind)
-            .AddMultiRateLimiters(
-                configureTaskLimiter: taskLimiterConfig.Bind,
-                configureSizeLimiter: sizeLimiterConfig.Bind
-            )
+            .AddLimiterManager(configure: (provider, manager) => ConfigureLimiterManager(context.Configuration, provider, manager))
             .AddSyncAsyncTaskRunner()
             .AddRedis(connStr: context.Configuration.GetConnectionString("Redis"));
 
@@ -99,4 +97,19 @@ void OnConnectionShutdown(object sender, ShutdownEventArgs e, ILogger<Worker> lo
         logger.LogError(e.Exception, "RabbitMQ connection shutdown reason: {Reason} | Message: {Message}", e.Cause, e.Exception?.Message);
     else
         logger.LogInformation("RabbitMQ connection shutdown reason: {Reason}", e.Cause);
+}
+
+
+static void ConfigureLimiterManager(IConfiguration configuration, IServiceProvider provider, ILimiterManager manager)
+{
+    var taskLimiterConfig = configuration.GetSection("TaskLimiter");
+    var taskLimiterOptions = taskLimiterConfig.Get<TaskLimiterOptions>();
+    var taskLimiterLogger = provider.GetRequiredService<ILogger<SyncAsyncTaskLimiter>>();
+    var taskLimiter = new SyncAsyncTaskLimiter(taskLimiterOptions, logger: taskLimiterLogger);
+    manager.AddLimiter(Constants.LimiterNames.TaskLimiter, taskLimiter);
+
+    var sizeLimiterConfig = configuration.GetSection("SizeLimiter");
+    var sizeLimiterOptions = sizeLimiterConfig.Get<RateLimiterOptions>();
+    var sizeLimiter = new DynamicRateLimiter(sizeLimiterOptions);
+    manager.AddLimiter(Constants.LimiterNames.SizeLimiter, sizeLimiter);
 }
