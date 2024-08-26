@@ -17,6 +17,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EmqxLearning.CoapPublisher"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EmqxLearning.ConsoleAppTesting", "EmqxLearning.ConsoleAppTesting\EmqxLearning.ConsoleAppTesting.csproj", "{6944942F-59F3-46DB-9384-D21F828BFD9F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EmqxLearning.RabbitMqPublisher", "EmqxLearning.RabbitMqPublisher\EmqxLearning.RabbitMqPublisher.csproj", "{9913F46D-7C3F-4A68-BD49-413C808E4A9B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -51,6 +53,10 @@ Global
 		{6944942F-59F3-46DB-9384-D21F828BFD9F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6944942F-59F3-46DB-9384-D21F828BFD9F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6944942F-59F3-46DB-9384-D21F828BFD9F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9913F46D-7C3F-4A68-BD49-413C808E4A9B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9913F46D-7C3F-4A68-BD49-413C808E4A9B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9913F46D-7C3F-4A68-BD49-413C808E4A9B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9913F46D-7C3F-4A68-BD49-413C808E4A9B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
