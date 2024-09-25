@@ -309,6 +309,7 @@ public class Worker : BackgroundService
         System.Timers.Timer closeTimer = new System.Timers.Timer(closeAfter);
         closeTimer.Elapsed += async (s, e) =>
         {
+            using var _ = closeTimer;
             while (_shouldBreak)
                 await Task.Delay(closeAfter);
             await CloseCircuit();
