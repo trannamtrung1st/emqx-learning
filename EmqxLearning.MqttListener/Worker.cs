@@ -22,7 +22,7 @@ namespace EmqxLearning.MqttListener;
 
 public class Worker : BackgroundService
 {
-    private readonly SemaphoreSlim _circuitLock = new(initialCount: 1);
+    private readonly SemaphoreSlim _circuitLock = new(initialCount: 1, maxCount: 1);
     private readonly ILogger<Worker> _logger;
     private readonly IConfiguration _configuration;
     private readonly IRabbitMqConnectionManager _rabbitMqConnectionManager;
@@ -581,7 +581,7 @@ internal class MqttClientWrapper
         _connectionErrorsPipeline = connectionErrorsPipeline;
         _stoppingToken = stoppingToken;
         ChannelId = channelId;
-        _batchLock = new SemaphoreSlim(1);
+        _batchLock = new SemaphoreSlim(1, 1);
         _batch = new Queue<MessageWrapper>();
         FlushBatchTimer = new System.Timers.Timer(flushBatchInterval)
         {

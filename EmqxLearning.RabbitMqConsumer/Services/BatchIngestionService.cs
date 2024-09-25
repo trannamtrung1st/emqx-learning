@@ -26,7 +26,7 @@ public class BatchIngestionService : IIngestionService, IDisposable
     private CancellationToken _stoppingToken;
     private Func<Task> _reconnectConsumer;
 
-    private static readonly SemaphoreSlim _circuitLock = new SemaphoreSlim(initialCount: 1);
+    private static readonly SemaphoreSlim _circuitLock = new SemaphoreSlim(initialCount: 1, 1);
     private bool _isCircuitOpen;
 
     public BatchIngestionService(
